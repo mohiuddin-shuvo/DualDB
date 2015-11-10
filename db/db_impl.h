@@ -50,10 +50,21 @@ class DBImpl : public DB {
   virtual Status Put(const WriteOptions& options,
                      const Slice& value);
   virtual Status Get(const ReadOptions& options,
-                     const Slice& key, std::vector<KeyValuePair>* value_list);
+                     const Slice& key, std::vector<std::string>& value_list);
+//
+//  virtual Status SGet(const ReadOptions& options,
+//                     const Slice& key, std::vector<KeyValuePair>* value_list, DB* db);
 
-  virtual Status SGet(const ReadOptions& options,
-                     const Slice& key, std::vector<KeyValuePair>* value_list, DB* db);
+  //Continuous Query DB
+  virtual Status PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users);
+
+  virtual Status GetC(const ReadOptions& options,
+                     const Slice& key, const Slice& value, std::vector<std::string>& events);
+
+  virtual Status GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& results);
+  virtual Status GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results);
+
+
   // Extra methods (for testing) that are not in the public DB interface
 
   // Compact any files in the named level that overlap [*begin,*end]
@@ -201,8 +212,12 @@ class DBImpl : public DB {
   };
   CompactionStats stats_[config::kNumLevels];
 
-  DB *pdb;
-  DB *sdb;
+
+  //Continuous Query DB
+
+  DB *datadb;
+  DB *querydb;
+
 
   // No copying allowed
   DBImpl(const DBImpl&);

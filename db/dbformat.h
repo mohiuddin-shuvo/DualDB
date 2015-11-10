@@ -14,6 +14,9 @@
 #include "util/coding.h"
 #include "util/logging.h"
 
+
+#include <iostream>
+
 namespace leveldb {
 
 // Grouping of constants.  We may want to make some of these
@@ -152,6 +155,7 @@ class InternalKey {
 
   void DecodeFrom(const Slice& s) { rep_.assign(s.data(), s.size()); }
   Slice Encode() const {
+	  //std::cout<<rep_<<std::endl;
     assert(!rep_.empty());
     return rep_;
   }

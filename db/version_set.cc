@@ -487,7 +487,15 @@ std::string V_GetAttr(const rapidjson::Document& doc, const char* attr) {
 
   std::ostringstream pKey;
 
-  if(val.IsNumber()) {
+  if(val.IsObject())
+  {
+	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
+	rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
+	val.Accept(writer);
+	std::string st=buffer.GetString();
+	return st;
+  }
+  else if(val.IsNumber()) {
     if(val.IsUint64()) {
       unsigned long long int tid = val.GetUint64();
       pKey<<tid;
@@ -521,8 +529,8 @@ std::string V_GetAttr(const rapidjson::Document& doc, const char* attr) {
   return pKey.str();
 }
  
-Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector<KeyValuePair>* value, 
-        GetStats* stats, std::string secKey, int kNoOfOutputs, DB* db,std::unordered_set<std::string>* resultSetofKeysFound)
+Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector<std::string>& value,
+        GetStats* stats, std::string secKey, int kNoOfOutputs)
 {
     
     //std::ofstream outputFile;
@@ -632,36 +640,28 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
             //outputFile<<i<<"\n";
             // read requested number of records from primary db
 
-            while (kNoOfOutputs > 0 && (int)i >= 0) {
+//            while (kNoOfOutputs > 0 && (int)i >= 0) {
+            while ((int)i >= 0)
+            {
                 std::string pkey = V_GetVal(key_list[i]);
-                std::string pValue;
-                if(resultSetofKeysFound->find(pkey)==resultSetofKeysFound->end())
-                {
-                    Status db_status = db->Get(options, pkey, &pValue);
 
-                    // if there are no errors, push KV pair onto return vector, latest record first
-                    // check for updated values
-                    if (db_status.ok()&&!db_status.IsNotFound()) {
-                        //outputFile<<pkey<<"\n"<<pValue<<"\n";
-                        rapidjson::Document temp_val;
-                        temp_val.Parse<0>(pValue.c_str());
-                        //outputFile<<user_key.ToString()<<" ukey\n"<<secKey.c_str()<<std::endl;
-                        if (user_key.ToString() == V_GetAttr(temp_val, secKey.c_str())) {
-                           // outputFile<<"found3\n";
-                          value->push_back(KeyValuePair(pkey, pValue));
-                          resultSetofKeysFound->insert(pkey);
-                          kNoOfOutputs--;
-                        }
-                    }
-                }
+				// if there are no errors, push KV pair onto return vector, latest record first
+				// check for updated values
+
+				//outputFile<<user_key.ToString()<<" ukey\n"<<secKey.c_str()<<std::endl;
+
+				value.push_back(pkey);
+
+				//kNoOfOutputs--;
+
                 i--;
 
             }
             
-            if(kNoOfOutputs<=0)
-            {
-                break;
-            }
+//            if(kNoOfOutputs<=0)
+//            {
+//                break;
+//            }
         }
         /*
         else  
@@ -675,50 +675,7 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
       
       
     }
-    /*
-    if(found)
-    {
-        //outputFile<<val.c_str()<<"found\n";
-        rapidjson::Document key_list;
 
-        key_list.Parse<0>(val.c_str());
-        rapidjson::SizeType i = key_list.Size() - 1;
-        //outputFile<<i<<"\n";
-        // read requested number of records from primary db
-
-        while (kNoOfOutputs > 0 && (int)i >= 0) {
-            std::string pkey = V_GetVal(key_list[i]);
-            std::string pValue;
-            if(resultSetofKeysFound->find(pkey)==resultSetofKeysFound->end())
-            {
-                Status db_status = db->Get(options, pkey, &pValue);
-
-                // if there are no errors, push KV pair onto return vector, latest record first
-                // check for updated values
-                if (db_status.ok()&&!db_status.IsNotFound()) {
-                    //outputFile<<pkey<<"\n"<<pValue<<"\n";
-                    rapidjson::Document temp_val;
-                    temp_val.Parse<0>(pValue.c_str());
-                    //outputFile<<user_key.ToString()<<" ukey\n"<<secKey.c_str()<<std::endl;
-                    if (user_key.ToString() == V_GetAttr(temp_val, secKey.c_str())) {
-                       // outputFile<<"found3\n";
-                      value->push_back(KeyValuePair(pkey, pValue));
-                      resultSetofKeysFound->insert(pkey);
-                      kNoOfOutputs--;
-                    }
-                }
-            }
-            i--;
-
-        }
-        
-        if(kNoOfOutputs<=0)
-        {
-            break;
-        }
-       
-    }
-     * */
   }
   
 

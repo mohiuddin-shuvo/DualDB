@@ -143,10 +143,9 @@ struct Options {
 
   std::string primary_key;
 
-
   std::string secondary_key;
 
-  bool isSecondaryDB;
+  bool isQueryDB;
   
   // Create an Options object with default values for all fields.
   Options();

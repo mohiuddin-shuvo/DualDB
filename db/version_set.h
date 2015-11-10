@@ -75,9 +75,9 @@ class Version {
   Status Get(const ReadOptions&, const LookupKey& key, std::string* val,
              GetStats* stats);
 
-  //Baseline Two
-  Status Get( const ReadOptions& options, const LookupKey&  key, std::vector<KeyValuePair>* value_list, GetStats* stats, 
-                std::string secKey,  int kNoOfOutputs, DB* db, std::unordered_set<std::string>* resultSetofKeysFound);
+  //Continuous Query DB
+  Status Get( const ReadOptions& options, const LookupKey& k, std::vector<std::string>& value,
+          GetStats* stats, std::string secKey, int kNoOfOutputs);
   
   
   

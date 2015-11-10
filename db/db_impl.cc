@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <set>
-#include <string>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <vector>
@@ -36,6 +36,8 @@
 #include <string>
 #include <sstream>
 #include <fstream>
+
+#include <iostream>
 
 namespace leveldb {
 
@@ -189,7 +191,7 @@ DBImpl::~DBImpl() {
 
 
   if (options_.using_s_index) {
-    delete sdb;
+    delete querydb;
   }
 
 }
@@ -242,7 +244,15 @@ std::string GetAttr(const rapidjson::Document& doc, const char* attr) {
 
   std::ostringstream pKey;
 
-  if(val.IsNumber()) {
+  if(val.IsObject())
+  {
+		rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
+		rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
+		val.Accept(writer);
+		std::string st=buffer.GetString();
+		return st;
+  }
+  else if(val.IsNumber()) {
     if(val.IsUint64()) {
       unsigned long long int tid = val.GetUint64();
       pKey<<tid;
@@ -951,6 +961,25 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
 }
 
+bool CheckifExpired(std::string json_value)
+{
+	rapidjson::Document document;
+	document.Parse<0>(json_value.c_str());
+
+	long int tnow= time(NULL);
+
+	std::string tmaxs = GetAttr(document, "Tmax");
+	if(tmaxs.empty())
+			return false;
+	long tmax = std::stol(tmaxs);
+
+	if(tnow > tmax )
+		return true;
+
+	return false;
+}
+
+
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
@@ -981,121 +1010,19 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
   
-  if(!options_.isSecondaryDB)
-  {
-        //std::ofstream outputFile;
-        //outputFile.open("/Users/nakshikatha/Desktop/test codes/debug2.txt", std::ofstream::out | std::ofstream::app);
-       
-        //outputFile<<"in11\n";
-        for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
-      // Prioritize immutable compaction work
-      if (has_imm_.NoBarrier_Load() != NULL) {
-        const uint64_t imm_start = env_->NowMicros();
-        mutex_.Lock();
-        if (imm_ != NULL) {
-          CompactMemTable();
-          bg_cv_.SignalAll();  // Wakeup MakeRoomForWrite() if necessary
-        }
-        mutex_.Unlock();
-        imm_micros += (env_->NowMicros() - imm_start);
-      }
-
-      Slice key = input->key();
-      if (compact->compaction->ShouldStopBefore(key) &&
-          compact->builder != NULL) {
-        status = FinishCompactionOutputFile(compact, input);
-        if (!status.ok()) {
-          break;
-        }
-      }
-
-      // Handle key/value, add to state, etc.
-      bool drop = false;
-      if (!ParseInternalKey(key, &ikey)) {
-        // Do not hide error keys
-        current_user_key.clear();
-        has_current_user_key = false;
-        last_sequence_for_key = kMaxSequenceNumber;
-      } else {
-        if (!has_current_user_key ||
-            user_comparator()->Compare(ikey.user_key,
-                                       Slice(current_user_key)) != 0) {
-          // First occurrence of this user key
-          current_user_key.assign(ikey.user_key.data(), ikey.user_key.size());
-          has_current_user_key = true;
-          last_sequence_for_key = kMaxSequenceNumber;
-        }
-
-        if (last_sequence_for_key <= compact->smallest_snapshot) {
-          // Hidden by an newer entry for same user key
-
-          drop = true;    // (A)
-        } else if (ikey.type == kTypeDeletion &&
-                   ikey.sequence <= compact->smallest_snapshot &&
-                   compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
-          // For this user key:
-          // (1) there is no data in higher levels
-          // (2) data in lower levels will have larger sequence numbers
-          // (3) data in layers that are being compacted here and have
-          //     smaller sequence numbers will be dropped in the next
-          //     few iterations of this loop (by rule (A) above).
-          // Therefore this deletion marker is obsolete and can be dropped.
-          drop = true;
-        }
-
-        last_sequence_for_key = ikey.sequence;
-      }
-  #if 0
-      Log(options_.info_log,
-          "  Compact: %s, seq %d, type: %d %d, drop: %d, is_base: %d, "
-          "%d smallest_snapshot: %d",
-          ikey.user_key.ToString().c_str(),
-          (int)ikey.sequence, ikey.type, kTypeValue, drop,
-          compact->compaction->IsBaseLevelForKey(ikey.user_key),
-          (int)last_sequence_for_key, (int)compact->smallest_snapshot);
-  #endif
-
-      if (!drop) {
-        // Open output file if necessary
-        if (compact->builder == NULL) {
-          status = OpenCompactionOutputFile(compact);
-          if (!status.ok()) {
-            break;
-          }
-        }
-        if (compact->builder->NumEntries() == 0) {
-          compact->current_output()->smallest.DecodeFrom(key);
-        }
-        compact->current_output()->largest.DecodeFrom(key);
-        compact->builder->Add(key, input->value());
-
-        // Close output file if it is big enough
-        if (compact->builder->FileSize() >=
-            compact->compaction->MaxOutputFileSize()) {
-          status = FinishCompactionOutputFile(compact, input);
-          if (!status.ok()) {
-            break;
-          }
-        }
-      }
-
-      input->Next();
-    }
-
-  }
-  else  //compaction work for secondary DB
+  //compaction work for Continuous Query DB
   {
   
-        //std::ofstream outputFile;
-        //outputFile.open("/Users/nakshikatha/Desktop/test codes/debug2.txt", std::ofstream::out | std::ofstream::app);
-       
+//        std::ofstream outputFile;
+//        outputFile.open("/home/mohiuddin/Desktop/LevelDB_CQ_Test/Debug/debug2.txt", std::ofstream::out );
+//
         //outputFile<<"in33\n";
         
         std::string prevKey;
 
         bool firstKeyOccurance = false;
         std::vector<std::string> temp_new_key_list;
-        std::unordered_set<std::string> resultSetofKeysFound;
+        //std::unordered_set<std::string> resultSetofKeysFound;
         
         for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
           // Prioritize immutable compaction work
@@ -1110,8 +1037,16 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
             imm_micros += (env_->NowMicros() - imm_start);
           }
 
-          Slice key = input->key();
+          std::string keys= input->key().ToString();
+          Slice key = keys;
           
+          if(keys.empty())
+		  {
+			std::cout<<"empty\n";
+
+		  }
+		  //std::cout<<keys<<std::endl;
+
           if (compact->compaction->ShouldStopBefore(key) &&
               compact->builder != NULL) {
             status = FinishCompactionOutputFile(compact, input);
@@ -1121,7 +1056,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
           }
 
           
-          //outputFile<<key.ToString()<<"\n"<<input->value().ToString()<<"\n";
+
 
           // Handle key/value, add to state, etc.
           bool drop = false;
@@ -1209,11 +1144,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
             std::string new_key_list;
             new_key_list = "[";
             
-            int j = 0;
+            size_t j = 0;
+            size_t i = 0;
+            size_t len = temp_new_key_list.size();
 
-            //outputFile<<"temp_new_key_list\n";
-            for (int i = temp_new_key_list.size()-1; i >=0 ; i--)
-            {
+			for (; i < len; i++)
+			{
                 /*
                 std::string value;
                 //outputFile<<temp_new_key_list[i]<<"\n";
@@ -1238,7 +1174,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                 
                 if (j != 0)
                       new_key_list += ",";
-                    new_key_list += ("\"" + temp_new_key_list[i] + "\"");
+                    //new_key_list += ("\"" + temp_new_key_list[i] + "\"");
+
+               		new_key_list +=  temp_new_key_list[i]  ;
                     j++;
                 
             } 
@@ -1255,6 +1193,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
             /////////////////////////////////////////////////////
              if (new_key_list != "[]")
              {
+
               compact->builder->Add(prevKey, newVal);
               //outputFile<<prevKey<<" key\n"<<new_key_list<<" value\n";
              }
@@ -1270,25 +1209,42 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
             }
             
             temp_new_key_list.clear();
-            resultSetofKeysFound.clear();
+            //resultSetofKeysFound.clear();
             
           }
           
           if(!drop)
           {
               std::string pkey_list = input->value().ToString();
+              //std::cout<<keys<<"\n";
+
               rapidjson::Document key_list;
               key_list.Parse<0>(pkey_list.c_str());
               
-              for (rapidjson::SizeType i = key_list.Size() - 1 ; (int)i >=0 ; i--)
+              //outputFile<<key.ToString()<<"\n"<<input->value().ToString()<<"\n";
+
+              rapidjson::SizeType len = key_list.Size();
+
+			  if(len>50000)
+				std::cout<<"Length of the compaction: "<<len<<std::endl;
+
+              unsigned i;
+              for ( i=0 ; i < len ; i++)
               {
                   std::string v = GetVal(key_list[i]);
-                  if(resultSetofKeysFound.find(v)==resultSetofKeysFound.end())
-                  {
-                        temp_new_key_list.push_back(v);
-                        resultSetofKeysFound.insert(v);
-                  }
+                  //if(resultSetofKeysFound.find(v)==resultSetofKeysFound.end())
+                  //{
+                  if(!CheckifExpired(v))
+                		  temp_new_key_list.push_back(v);
+
+                  //resultSetofKeysFound.insert(v);
+                  //}
               }
+
+//              std::cout << "size: " << temp_new_key_list.size() << "\n";
+//				std::cout << "capacity: " << temp_new_key_list.capacity() << "\n";
+//				std::cout << "max_size: " << temp_new_key_list.max_size() << "\n";
+
           }
           
           prevKey = key.ToString();
@@ -1299,11 +1255,11 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         if (!temp_new_key_list.empty()) 
         {
             // Open output file if necessary
-            bool f = true;
+            bool f = false;
             if (compact->builder == NULL) {
               status = OpenCompactionOutputFile(compact);
               if (!status.ok()) {
-                f = false;
+                f = true;
                 
               }
             }
@@ -1320,10 +1276,11 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                 std::string new_key_list;
                 new_key_list = "[";
 
-                int j = 0;
+                size_t j = 0;
+                size_t i = 0;
+                size_t len = temp_new_key_list.size();
 
-
-                for (int i = temp_new_key_list.size()-1; i >=0 ; i--)
+                for (; i < len; i++)
                 {
                     /*
                     std::string value;
@@ -1344,7 +1301,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                      */
                     if (j != 0)
                       new_key_list += ",";
-                    new_key_list += ("\"" + temp_new_key_list[i] + "\"");
+                    //new_key_list += ("\"" + temp_new_key_list[i] + "\"");
+                    new_key_list +=  temp_new_key_list[i]  ;
+
                     j++;
                 } 
 
@@ -1360,7 +1319,13 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                 /////////////////////////////////////////////////////
                  if (new_key_list != "[]")
                  {
-                  compact->builder->Add(prevKey, newVal);
+//                		if(prevKey.empty())
+//                		{
+//                			std::cout<<"empty\n";
+
+
+                		//}
+                		compact->builder->Add(prevKey, newVal);
                   //outputFile<<prevKey<<" k\n"<<new_key_list<<" v\n";
                  }
       
@@ -1375,7 +1340,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                 }
 
                 temp_new_key_list.clear();
-                resultSetofKeysFound.clear();
+                //resultSetofKeysFound.clear();
             }
 
       }
@@ -1559,11 +1524,16 @@ void DBImpl::ReleaseSnapshot(const Snapshot* s) {
 // Convenience methods
 //Baseline Two
 Status DBImpl::Put(const WriteOptions& o, const Slice& key, const Slice& val) {
-    if(!options_.isSecondaryDB)
-    {
-        return DB::Put(o, key, val);
-    }
-    else
+
+//    if(!options_.isQueryDB)
+//    {
+//        return DB::Put(o, key, val);
+//    }
+//    else
+
+	if(key.empty())
+		std::cout<<"empty\n";
+
     {
         //std::ofstream outputFile;
         //outputFile.open("/Users/nakshikatha/Desktop/test codes/debug3.txt", std::ofstream::out | std::ofstream::app);
@@ -1606,35 +1576,33 @@ Status DBImpl::Put(const WriteOptions& o, const Slice& key, const Slice& val) {
     
         
         if(memfound && mems.ok() && !mems.IsNotFound())
+        //if(false)
         {
             
             rapidjson::Document key_list;
             key_list.Parse<0>(mem_pkey_list.c_str());
             
-            rapidjson::Document input_key_list;
-            input_key_list.Parse<0>(val.data());
+            //rapidjson::Document input_key_list;
+            //input_key_list.Parse<0>(val.data());
             
             
             std::string new_key_list = "[";
-            rapidjson::SizeType j = 0;
+            //rapidjson::SizeType j = 0;
 
-            
+            new_key_list += val.ToString();
+            //j++;
             for (rapidjson::SizeType i = 0; i < key_list.Size(); i++)
             {
-                if (j != 0)
-                  new_key_list += ",";
-                new_key_list += ("\"" + GetVal(key_list[i]) + "\"");
-                j++;
+
+                new_key_list += ",";
+                new_key_list += GetVal(key_list[i]);//("\"" + GetVal(key_list[i]) + "\"");
+                //j++;
            
             }
-            for (rapidjson::SizeType i = 0; i < input_key_list.Size(); i++)
-            {
-                if (j != 0)
-                  new_key_list += ",";
-                new_key_list += ("\"" + GetVal(input_key_list[i]) + "\"");
-                j++;
-           
-            }
+
+
+
+
           new_key_list += "]";
         
           
@@ -1645,7 +1613,11 @@ Status DBImpl::Put(const WriteOptions& o, const Slice& key, const Slice& val) {
         else
         {
             mem->Unref();
-            return DB::Put(o, key, val);
+            std::string new_key_list = "[";
+            new_key_list +=  val.ToString() ;
+            new_key_list += "]";
+            Slice newval = new_key_list;
+            return DB::Put(o, key, newval);
         }
  
     }
@@ -1657,6 +1629,89 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
  
   return DB::Delete(options, key);
 }
+
+
+//Continuous query DB
+Status DBImpl::PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& listofUsers)
+{
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tnow = GetAttr(val, "Tnow");
+
+    //std::vector<std::string> listofUsers;
+
+	Status s;
+
+    s = this->querydb->GetAllUsers(key, tnow, listofUsers);
+
+    s = this->Put(options, key, json_value);
+
+    return s;
+
+}
+
+//This function is only called from QueryDB
+Status DBImpl::GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& users)
+{
+	std::vector<std::string> listofusersJson;
+
+	this->Get(ReadOptions(), key, listofusersJson);
+
+	//Extract UserIDs from the list
+	for(int i=0; i< listofusersJson.size(); i++)
+	{
+		rapidjson::Document val;
+
+		std::string s = listofusersJson[i];
+
+		val.Parse<0>(s.c_str());
+
+		std::string user = GetAttr(val, "UserId");
+
+		users.push_back(user);
+	}
+
+	return Status::OK();
+}
+
+//This function is only called from EventsDB
+
+Status DBImpl::GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results)
+{
+	//TO do Filter Results with tmin
+	
+	Status s = this->Get(options, key, results);
+
+	return s;
+}
+
+
+Status DBImpl::GetC(const ReadOptions& roptions, const Slice& key, const Slice& json_value, std::vector<std::string>& events)
+{
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tmin = GetAttr(val, "Tmin");
+    std::string tmax = GetAttr(val, "Tmax");
+    std::string tnow = GetAttr(val, "Tnow");
+
+    Status s;
+
+    if(tnow>tmin)
+    {
+        s = this->GetAllEvents(roptions, key, tmin , events);
+    }
+    if(tnow<tmax)
+    {
+        s = this->querydb->Put(WriteOptions(), key, json_value);
+    }
+
+    return s;
+}
+
 
  
 Status DBImpl::Put(const WriteOptions& options, const Slice& value) {
@@ -1676,7 +1731,7 @@ Status DBImpl::Put(const WriteOptions& options, const Slice& value) {
   Slice sk = skey;
   Slice pk = pkey;
   if(!skey.empty())
-    sdb_status = this->sdb->Put(options, skey, new_key_list);
+    sdb_status = this->querydb->Put(options, skey, new_key_list);
   
   json_val.RemoveMember(this->options_.primary_key.c_str());
   rapidjson::StringBuffer pstrbuf;
@@ -1692,14 +1747,12 @@ Status DBImpl::Put(const WriteOptions& options, const Slice& value) {
  
 //*******************************************************************************************
 //
-Status DBImpl::Get(const ReadOptions& options, const Slice& skey, std::vector<KeyValuePair>* value_list) {
-    return this->sdb->SGet(options, skey, value_list, this);
 
-}
-Status DBImpl::SGet(const ReadOptions& options, const Slice& skey, std::vector<KeyValuePair>* value_list, DB* db) {
+Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std::string>& value_list) {
     
-    //std::ofstream outputFile;
-    //outputFile.open("/Users/nakshikatha/Desktop/test codes/debug3.txt", std::ofstream::out | std::ofstream::app);
+//std::ofstream outputFile;
+//outputFile.open("/Users/nakshikatha/Desktop/test codes/debug3.txt", std::ofstream::out | std::ofstream::app);
+
   Status s;
   //outputFile<<"innnn\n";
   MutexLock l(&mutex_);
@@ -1726,43 +1779,29 @@ Status DBImpl::SGet(const ReadOptions& options, const Slice& skey, std::vector<K
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     //outputFile<<"in\n";
-    LookupKey lkey(skey, snapshot);
+    LookupKey lkey(key, snapshot);
     //outputFile<<"in\n";
     
     rapidjson::Document mem_key_list,imm_key_list,sst_key_list;
     std::string mem_value,imm_value;
-    int kNoOfOutputs = options.num_records;
-    std::unordered_set<std::string> resultSetofKeysFound;
+
+    //int kNoOfOutputs = options.num_records;
+
     if(mem->Get(lkey, &mem_value, &s))
     {
         mem_key_list.Parse<0>(mem_value.c_str());
-        
-        //Perform Read Repair by Get(pKey) on memtable values
-    
-        int i = mem_key_list.Size() - 1;
-        while (kNoOfOutputs>0&& i >= 0) {
-            std::string pkey = GetVal(mem_key_list[i]);
-            std::string pValue;
-            
-            if(resultSetofKeysFound.find(pkey)==resultSetofKeysFound.end())
-            {
-                Status db_status = db->Get(options, pkey, &pValue);
 
-                // if there are no errors, push KV pair onto return vector, latest record first
-                // check for updated values
-                if (db_status.ok()&&!db_status.IsNotFound()) {
-                    rapidjson::Document temp_val;
-                    temp_val.Parse<0>(pValue.c_str());
-                    //outputFile<<pkey<<" -> "<<pValue<<"\n"<<skey.ToString()<<" == "<< GetAttr(temp_val, this->options_.secondary_key.c_str())<<"\n";
-                    if (skey.ToString() == GetAttr(temp_val, this->options_.secondary_key.c_str()))
-                    {
-                      value_list->push_back(KeyValuePair(pkey, pValue));
-                      resultSetofKeysFound.insert(pkey);
-                      kNoOfOutputs--;
-                    }
-                }
-            }
-            i--;
+        int i = mem_key_list.Size() - 1;
+      //  while (kNoOfOutputs>0&& i >= 0) {
+        while ( i >= 0)
+        {
+			std::string pkey = GetVal(mem_key_list[i]);
+
+			//outputFile<<pkey<<" -> "<<pValue<<"\n"<<skey.ToString()<<" == "<< GetAttr(temp_val, this->options_.secondary_key.c_str())<<"\n";
+
+			value_list.push_back(pkey);
+
+			i--;
 
         }
     }
@@ -1771,49 +1810,41 @@ Status DBImpl::SGet(const ReadOptions& options, const Slice& skey, std::vector<K
     
   
     
-    if(imm != NULL && kNoOfOutputs>0) {
-      if(imm->Get(lkey, &imm_value, &s))
-      {
-       
-           imm_key_list.Parse<0>(imm_value.c_str());
-           
-           //Perform Read Repair by Get(pKey) on memtable values
-    
-            int i = imm_key_list.Size() - 1;
-            while (kNoOfOutputs>0&& i >= 0) {
-                std::string pkey = GetVal(imm_key_list[i]);
-                std::string pValue;
-                if(resultSetofKeysFound.find(pkey)==resultSetofKeysFound.end())
-                {
-                    Status db_status = db->Get(options, pkey, &pValue);
+   // if(imm != NULL && kNoOfOutputs>0)
+    if(imm != NULL)
+    {
+    	if(imm->Get(lkey, &imm_value, &s))
+    	{
+    		imm_key_list.Parse<0>(imm_value.c_str());
 
-                    // if there are no errors, push KV pair onto return vector, latest record first
-                    // check for updated values
-                    if (db_status.ok()&&!db_status.IsNotFound()) {
-                        rapidjson::Document temp_val;
-                        temp_val.Parse<0>(pValue.c_str());
-                        if (skey.ToString() == GetAttr(temp_val, this->options_.secondary_key.c_str())) {
-                          value_list->push_back(KeyValuePair(pkey, pValue));
-                          resultSetofKeysFound.insert(pkey);
-                          kNoOfOutputs--;
-                        }
-                    }
-                }
-                i--;
+			int i = imm_key_list.Size() - 1;
+			//  while (kNoOfOutputs>0&& i >= 0) {
+			while ( i >= 0)
+			{
+				std::string pkey = GetVal(imm_key_list[i]);
 
-            }
-      }
+				//outputFile<<pkey<<" -> "<<pValue<<"\n"<<skey.ToString()<<" == "<< GetAttr(temp_val, this->options_.secondary_key.c_str())<<"\n";
+
+				value_list.push_back(pkey);
+
+				i--;
+
+			}
+    	 }
       
     }  
     
 
     ///////////////////////////////////////
     
-    if(kNoOfOutputs>0)
+    //if(kNoOfOutputs>0)
     {
         //outputFile<<"sstget\n";
-        s = current->Get(options, lkey, value_list, &stats, this->options_.secondary_key, kNoOfOutputs,db,&resultSetofKeysFound);
-        //outputFile<<"in\n";
+    	//s = current->Get(options, lkey, value_list, &stats, this->options_.secondary_key, kNoOfOutputs,db,&resultSetofKeysFound);
+    	s = current->Get(options, lkey, value_list, &stats, this->options_.secondary_key, 0);
+
+
+    	//outputFile<<"in\n";
     }
     //outputFile<<kNoOfOutputs;
     //outputFile<<value->size()<<endl;
@@ -2116,9 +2147,10 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() { }
 
-//Baseline two
+//Continuous Query DB
+
 Status DB::Open(const Options& options, const std::string& dbname,
-                DB** dbptr,DB* pDbOfSDb) {
+                DB** dbptr,DB* qDbOfdDb) {
   *dbptr = NULL;
 
   DBImpl* impl = new DBImpl(options, dbname);
@@ -2136,8 +2168,8 @@ Status DB::Open(const Options& options, const std::string& dbname,
       impl->logfile_number_ = new_log_number;
       impl->log_ = new log::Writer(lfile);
       s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
-      if(options.isSecondaryDB&&pDbOfSDb!= NULL)
-          impl->pdb = pDbOfSDb;
+      if(options.isQueryDB&&qDbOfdDb!= NULL)
+          impl->datadb = qDbOfdDb;
           
     }
     if (s.ok()) {
@@ -2153,17 +2185,17 @@ Status DB::Open(const Options& options, const std::string& dbname,
   }
   
   if (s.ok() && options.using_s_index) {
-    std::string sdbname = dbname + "/_" + options.secondary_key;
+    std::string sdbname = dbname + "/_QueryDB";
 
     Options soption;
     soption.create_if_missing = true;
     soption.using_s_index  = false;
  
-    soption.isSecondaryDB = true;
-    soption.primary_key = options.primary_key ;
-    soption.secondary_key = options.secondary_key ;
+    soption.isQueryDB = true;
+    //soption.primary_key = options.primary_key ;
+    //soption.secondary_key = options.secondary_key ;
     
-    Status sstatus = DB::Open(soption, sdbname, &impl->sdb, *dbptr);
+    Status sstatus = DB::Open(soption, sdbname, &impl->querydb, *dbptr);
     
     // return any errors, secondary db errors first
     return sstatus.ok() ? s : sstatus;

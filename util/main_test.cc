@@ -1,28 +1,97 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-
+#include <fstream>
+#include <vector>
 #include "leveldb/db.h"
 #include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/prettywriter.h"	// for stringify JSON
+#include "rapidjson/filestream.h"
+#include <leveldb/slice.h>
+#include <sys/time.h>
 
 using namespace std;
+using namespace rapidjson;
 
 //mac
 //static string dbPath = "/home/nakshikatha/Desktop/LevelDB_CQ_Test/TestDB";
-//ubuntu
-static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/TestDB";
 
+
+//ubuntu
+static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/DB/BenchmarkDualDB";
+static string benchmarkPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Benchmark/CQ1_Q75";
+static string result_filePath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Results/DualDB_CQ1_Q75_result.txt";
+
+bool SetAttr(rapidjson::Document& doc, const char* attr, long value) {
+  if(!doc.IsObject() || !doc.HasMember(attr) || doc[attr].IsNull())
+    return false;
+
+  std::ostringstream pKey;
+  //cout<<value << " ";
+  string val =  std::to_string(value);
+  //cout<<val<<endl;
+
+	Value v;
+	v.SetString(val.c_str(), val.length(), doc.GetAllocator());
+	doc.RemoveMember(attr);
+	doc.AddMember(attr,  v , doc.GetAllocator());
+   //doc[attr].SetString(val.c_str());
+   return true;
+
+}
 std::string generateJSON(std::string k, std::string v) {
     return "{\"City\": \"" + k + "\",\"State\": \"" + v + "\"}";
 }
 
-void print_vals(std::vector<leveldb::KeyValuePair>& vals) {
-  for(std::vector<leveldb::KeyValuePair>::iterator it = vals.begin(); it != vals.end(); ++it)
-    cout << "key: " << it->key.data() << " value: " << it->value.data() << std::endl;
+void print_vals(std::vector<string>& vals) {
+  for(std::vector<string>::iterator it = vals.begin(); it != vals.end(); ++it)
+    cout << "Users: " << *it << " ";
+  cout<<std::endl;
 }
 
+std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
 
-void test_init(string dbpath)
+std::vector<std::string> split(const std::string &s, char delim) {
+    std::vector<std::string> elems;
+    split(s, delim, elems);
+    return elems;
+}
+
+std::string parse_json (std::string json)
+{
+	rapidjson::Document document;
+	document.Parse<0>(json.c_str());
+
+	long int sec= time(NULL);
+
+	//cout<<sec<<endl;
+
+	bool tmin = SetAttr(document, "Tnow", sec);
+
+	tmin = SetAttr(document, "Tmin", sec-1000);
+
+	if(tmin) //Query
+		tmin = SetAttr(document, "Tmax", sec+1000);
+	else //Event
+		tmin = SetAttr(document, "Tmax", sec+5000);
+
+	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
+	rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
+	document.Accept(writer);
+	std::string st=buffer.GetString();
+	return st;
+}
+
+void test_frombenchmark()
 {
     
     //
@@ -34,106 +103,160 @@ void test_init(string dbpath)
     options.using_s_index = true;
     options.primary_key = "City";
     options.secondary_key = "State";
-    options.isSecondaryDB = false;
-    options.using_s_index = true;
-    options.isSecondaryDB = false;
+    options.isQueryDB = false;
+
+    ifstream ifile(benchmarkPath.c_str());
+    if (!ifile) { cerr << "Can't open input file " << endl; return; }
+    ofstream ofile(result_filePath.c_str(),  std::ofstream::out | std::ofstream::app );
+    if (!ofile) { cerr << "Can't open output file " << endl; return; }
 
     std::cout << "Trying to create database\n";
 
-    leveldb::Status status = leveldb::DB::Open(options, dbpath , &db);
+    leveldb::Status status = leveldb::DB::Open(options, dbPath , &db);
     assert(status.ok());
 
-    std::cout << "Created databases\n";
-
-    leveldb::WriteOptions woptions;
-    std::string val;
-
-    std::cout << "Trying to write values\n";
-
-    val = generateJSON("Riverside", "California");
-    leveldb::Status s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Los Angeles", "California");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("San Diego", "California");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Miami", "Florida");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Springfield", "Illinois");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Springfield", "Massachusetts");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Los Angeles", "California");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Boston", "Massachusetts");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    val = generateJSON("Irvine", "California");
-    s = db->Put(woptions, val);
-    assert(s.ok());
-
-    //*/
-    std::cout << "\nFinished writing values\n";
+    string line;
+	int i=0;
+	rapidjson::Document d;
+	leveldb::ReadOptions roptions;
+	double data=0, query=0;
+	double durationData=0,durationQuery=0;
 
 
+	vector<string> events;
+	vector<string> users;
+
+    while(getline(ifile, line)) {
+
+    	i++;
+
+		std::vector<std::string> x = split(line, '\t');
+		leveldb::WriteOptions woptions;
+		struct timeval start, end;
+		if(x.size()==3) {
+			leveldb::Slice key = x[1];
+			if(x[1].empty())
+				continue;
+			//cout<<parse_json(x[2])<<endl;
+			//continue;
+			string json_string = parse_json(x[2]);
+			leveldb::Slice json_value = json_string;
+			//cout<<x[1]<<" ";
+			//cout<<json_value.ToString()<<endl;
+
+			gettimeofday(&start, NULL);
+			if(x[0]=="D") {
+
+				leveldb::Status s = db->PutC(woptions,key, json_value, users );
+
+				gettimeofday(&end, NULL);
+				durationData+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+				//print_vals(users);
+				//cout<<"Users: "<<users.size()<<endl;
+
+				if(users.size()>0)
+				{
+					//cout<<"Users: "<<users.size()<<endl;
+					users.clear();
+
+				}
+
+				data++;
+			}
+			else if(x[0]=="Q")
+			{
+
+				leveldb::Status s = db->GetC(roptions, key , json_value, events);
+				gettimeofday(&end, NULL);
+				durationQuery+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+				//print_vals(events);
+
+				//cout<<"Events: "<<events.size()<<endl;
+
+				if(events.size()>0) {
+					//cout<<"Events: "<<events.size()<<endl;
+					events.clear();
+				}
+				query++;
+			}
+		}
+//		if(i==20)
+//			break;
+		if (i%100000 == 0) {
+			ofile<<"i: "<<i<<endl;
+			ofile<<"Number of Queries: "<<query<<endl;
+			ofile<<"Total Query duration: "<<durationQuery<<endl;
+			ofile<<"Time per Query: "<<durationQuery/query<<endl<<endl;
+
+			cout<<i<<endl<<"Time per Query: "<<durationQuery/query<<endl;
+
+			ofile<<"Number of Events: "<<data<<endl;
+			ofile<<"Total Event duration: "<<durationData<<endl;
+			ofile<<"Time per Event: "<<durationData/data<<endl<<endl;
+
+			cout<<"Time per Data: "<<durationData/data<<endl<<endl;
+
+			ofile<<"Number of operation: "<<data+query<<endl;
+			ofile<<"Time taken of all operation: "<<(durationData+durationQuery)<<endl;
+			ofile<<"Time per operation: "<<(durationData+durationQuery)/(data+query)<<endl<<endl<<endl;
+		}
+    }
+
+    delete db;
+
+}
+
+void testingRapidJson ()
+{
+
+	leveldb::Slice val =  "{ \"hello\" : \"world\" }";
+
+	std::string new_key_list = "[";
+	new_key_list += ("\"" + val.ToString() + "\"");
+	new_key_list += "]";
+
+	rapidjson::Document document;
+	document.Parse<0>(new_key_list.c_str());
+
+//
+//	PrettyWriter<FileStream> writer(f);
+//	document.Accept(writer);
+	GenericStringBuffer<UTF8<>> buffer;
+//	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
+//
+	Writer< GenericStringBuffer< UTF8<> > > writer(buffer);
+	document.Accept(writer);
+	std::string st=buffer.GetString();
 
 
-    //* // read them back
-    leveldb::ReadOptions roptions;
-    std::string skey;
-    std::vector<leveldb::KeyValuePair> ret_vals;
+	cout<<document.Size();
+	int i = document.Size() - 1;
+		  //  while (kNoOfOutputs>0&& i >= 0) {
+	while ( i >= 0)
+	{
 
-    skey = "California";
-    roptions.num_records = 5;
-    leveldb::Status s2 = db->Get(roptions, skey, &ret_vals);
-    assert(s2.ok());
-    print_vals(ret_vals);
-    cout<<ret_vals.size()<<endl;
 
-    ret_vals.clear();
-    skey = "Florida";
-    roptions.num_records = 2;
-    db->Get(roptions, skey, &ret_vals);
-    print_vals(ret_vals);
-    cout<<ret_vals.size()<<endl;
+		if(document[i].IsObject())
+		{
+			GenericStringBuffer<UTF8<>> buffer;
+			Writer< GenericStringBuffer< UTF8<> > > writer(buffer);
+			document[i].Accept(writer);
+			std::string st=buffer.GetString();
+			cout<<st;
+		}
 
-    ret_vals.clear();
-    skey = "Illinois";
-    roptions.num_records = 4;
-    db->Get(roptions, skey, &ret_vals);
-    print_vals(ret_vals);
-    cout<<ret_vals.size()<<endl;
+		i--;
+	}
 
-    ret_vals.clear();
-    skey = "Massachusetts";
-    roptions.num_records = 3;
-    db->Get(roptions, skey, &ret_vals);
-    print_vals(ret_vals);
-    cout<<ret_vals.size()<<endl;
-    //*/
-    std::cout << "\nFinished reading values\n";
+
 }
 
 /*
- * 
+ *
  */
 int main(int argc, char** argv) {
 
-    test_init(dbPath);
-    return 0;
+	test_frombenchmark();
+	return 0;
 }
 
