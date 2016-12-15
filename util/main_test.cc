@@ -4,6 +4,7 @@
 #include <fstream>
 #include <vector>
 #include "leveldb/db.h"
+#include "leveldb/cache.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -15,14 +16,16 @@
 using namespace std;
 using namespace rapidjson;
 
-//mac
-//static string dbPath = "/home/nakshikatha/Desktop/LevelDB_CQ_Test/TestDB";
 
+//server
+//static string dbPath = "/home/mabdu002/ContinuousQuery/DB/BenchmarkDualDB";
+//static string benchmarkPath = "/home/mabdu002/ContinuousQuery/Benchmark/RD_CQ1_Q50";
+//static string result_filePath = "/home/mabdu002/ContinuousQuery/Results/DualDB_RD_Q50_result.csv";
 
 //ubuntu
-static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/DB/BenchmarkDualDB";
-static string benchmarkPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Benchmark/CQ1_Q75";
-static string result_filePath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Results/DualDB_CQ1_Q75_result.txt";
+static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/DB/DualDB_Dewey";
+static string benchmarkPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Benchmark/RD_CQ1_Q25_Dewey";
+static string result_filePath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Results/DualDB_Dwey.csv";
 
 bool SetAttr(rapidjson::Document& doc, const char* attr, long value) {
   if(!doc.IsObject() || !doc.HasMember(attr) || doc[attr].IsNull())
@@ -77,12 +80,12 @@ std::string parse_json (std::string json)
 
 	bool tmin = SetAttr(document, "Tnow", sec);
 
-	tmin = SetAttr(document, "Tmin", sec-1000);
+	tmin = SetAttr(document, "Tmin", sec-10);
 
 	if(tmin) //Query
-		tmin = SetAttr(document, "Tmax", sec+1000);
+		tmin = SetAttr(document, "Tmax", sec+10);
 	else //Event
-		tmin = SetAttr(document, "Tmax", sec+5000);
+		tmin = SetAttr(document, "Tmax", sec+15);
 
 	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
 	rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
@@ -99,11 +102,18 @@ void test_frombenchmark()
     leveldb::DB* db;
     leveldb::Options options;
 
+    long sizeperblock = 8*1024;
+    size_t cachesize = 2L * 100L * 1000L * 1000L * 1024L; //200MB
+
+    options.block_size = sizeperblock;
+
+    options.block_cache = leveldb::NewLRUCache(cachesize);  //200 MB
+
     options.create_if_missing = true;
-    options.using_s_index = true;
-    options.primary_key = "City";
-    options.secondary_key = "State";
-    options.isQueryDB = false;
+//    options.using_s_index = true;
+//    options.primary_key = "City";
+//    options.secondary_key = "State";
+//    options.isQueryDB = false;
 
     ifstream ifile(benchmarkPath.c_str());
     if (!ifile) { cerr << "Can't open input file " << endl; return; }
@@ -126,6 +136,7 @@ void test_frombenchmark()
 	vector<string> events;
 	vector<string> users;
 
+	long userc = 0, eventc = 0;
     while(getline(ifile, line)) {
 
     	i++;
@@ -147,7 +158,8 @@ void test_frombenchmark()
 			gettimeofday(&start, NULL);
 			if(x[0]=="D") {
 
-				leveldb::Status s = db->PutC(woptions,key, json_value, users );
+				leveldb::Status s = db->PutBaseComplexQuery(woptions,key, json_value, users, events );
+				//leveldb::Status s = db->PutC(woptions, key , json_value, users);
 
 				gettimeofday(&end, NULL);
 				durationData+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
@@ -157,24 +169,38 @@ void test_frombenchmark()
 				if(users.size()>0)
 				{
 					//cout<<"Users: "<<users.size()<<endl;
+					userc+=users.size();
 					users.clear();
 
-				}
 
+				}
+				if(events.size()>0)
+				{
+					//cout<<"Events: "<<events.size()<<endl;
+					events.clear();
+				}
 				data++;
 			}
 			else if(x[0]=="Q")
 			{
 
-				leveldb::Status s = db->GetC(roptions, key , json_value, events);
+				//leveldb::Status s = db->GetC(roptions, key , json_value, events);
+				leveldb::Status s = db->GetBaseComplexQuery(roptions, key , json_value, users, events );
+
 				gettimeofday(&end, NULL);
 				durationQuery+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
 				//print_vals(events);
 
 				//cout<<"Events: "<<events.size()<<endl;
-
+				if(users.size()>0)
+				{
+//					//cout<<"Users: "<<users.size()<<endl;
+					users.clear();
+//
+				}
 				if(events.size()>0) {
 					//cout<<"Events: "<<events.size()<<endl;
+					eventc+=events.size();
 					events.clear();
 				}
 				query++;
@@ -182,27 +208,32 @@ void test_frombenchmark()
 		}
 //		if(i==20)
 //			break;
-		if (i%100000 == 0) {
-			ofile<<"i: "<<i<<endl;
-			ofile<<"Number of Queries: "<<query<<endl;
-			ofile<<"Total Query duration: "<<durationQuery<<endl;
-			ofile<<"Time per Query: "<<durationQuery/query<<endl<<endl;
+		if (i%50000 == 0) {
+//			ofile<<"i: "<<i<<endl;
+//			ofile<<"Number of Queries: "<<query<<endl;
+//			ofile<<"Total Query duration: "<<durationQuery<<endl;
+//			ofile<<"Time per Query: "<<durationQuery/query<<endl<<endl;
+//
+			//cout<<i<<endl<<"Time per Query: "<<durationQuery/query<<endl;
+//
+//			ofile<<"Number of Events: "<<data<<endl;
+//			ofile<<"Total Event duration: "<<durationData<<endl;
+//			ofile<<"Time per Event: "<<durationData/data<<endl<<endl;
+//
+			//cout<<"Time per Data: "<<durationData/data<<endl<<endl;
+//
+//			ofile<<"Number of operation: "<<data+query<<endl;
+//			ofile<<"Time taken of all operation: "<<(durationData+durationQuery)<<endl;
+//			ofile<<"Time per operation: "<<(durationData+durationQuery)/(data+query)<<endl<<endl<<endl;
 
-			cout<<i<<endl<<"Time per Query: "<<durationQuery/query<<endl;
+			ofile<< i <<"," << (durationData+durationQuery)/i <<"," << query <<"," << durationQuery/query <<"," << data <<"," << durationData/data << ","<< userc/data <<","<<eventc/query<<endl;
+			//cout<< userc/data <<","<<eventc/query<<endl;
 
-			ofile<<"Number of Events: "<<data<<endl;
-			ofile<<"Total Event duration: "<<durationData<<endl;
-			ofile<<"Time per Event: "<<durationData/data<<endl<<endl;
-
-			cout<<"Time per Data: "<<durationData/data<<endl<<endl;
-
-			ofile<<"Number of operation: "<<data+query<<endl;
-			ofile<<"Time taken of all operation: "<<(durationData+durationQuery)<<endl;
-			ofile<<"Time per operation: "<<(durationData+durationQuery)/(data+query)<<endl<<endl<<endl;
 		}
     }
 
     delete db;
+    delete options.block_cache;
 
 }
 
@@ -256,7 +287,8 @@ void testingRapidJson ()
  */
 int main(int argc, char** argv) {
 
-	test_frombenchmark();
+	//test_frombenchmark();
+	cout<<"Compile_DualDB!\n";
 	return 0;
 }
 

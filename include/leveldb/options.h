@@ -139,13 +139,13 @@ struct Options {
   const FilterPolicy* filter_policy;
 
 
-  bool using_s_index;
-
-  std::string primary_key;
-
-  std::string secondary_key;
-
-  bool isQueryDB;
+//  bool using_s_index;
+//
+//  std::string primary_key;
+//
+//  std::string secondary_key;
+//
+//  bool isQueryDB;
   
   // Create an Options object with default values for all fields.
   Options();

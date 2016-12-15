@@ -18,6 +18,9 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
+#include <sstream>
+#include <fstream>
+
 namespace leveldb {
 
 class MemTable;
@@ -47,10 +50,13 @@ class DBImpl : public DB {
 
   //Baseline Two
   
-  virtual Status Put(const WriteOptions& options,
-                     const Slice& value);
+//  virtual Status Put(const WriteOptions& options,
+//                     const Slice& value);
   virtual Status Get(const ReadOptions& options,
-                     const Slice& key, std::vector<std::string>& value_list);
+                     const Slice& key, std::vector<std::string>& value_list, std::string& t, bool isQuery);
+
+  virtual Status Get(const ReadOptions& options,
+                       const Slice& keyd, const Slice& keyq, std::vector<std::string>& users,  std::vector<std::string>& events, std::string& tnow, std::string& tmin);
 //
 //  virtual Status SGet(const ReadOptions& options,
 //                     const Slice& key, std::vector<KeyValuePair>* value_list, DB* db);
@@ -64,6 +70,128 @@ class DBImpl : public DB {
   virtual Status GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& results);
   virtual Status GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results);
 
+  virtual Status GetBaseComplexQuery(const ReadOptions& options,
+             const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events);
+
+  virtual Status PutBaseComplexQuery(const WriteOptions& options,
+               const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events);
+
+  static std::string GetAttr(const rapidjson::Document& doc, const char* attr) {
+    if(!doc.IsObject() || !doc.HasMember(attr) || doc[attr].IsNull())
+      return "";
+
+    std::ostringstream pKey;
+
+    if(doc[attr].IsNumber()) {
+      if(doc[attr].IsUint64()) {
+        unsigned long long int tid = doc[attr].GetUint64();
+        pKey<<tid;
+      }
+      else if (doc[attr].IsInt64()) {
+        long long int tid = doc[attr].GetInt64();
+        pKey<<tid;
+      }
+      else if (doc[attr].IsDouble()) {
+        double tid = doc[attr].GetDouble();
+        pKey<<tid;
+      }
+      else if (doc[attr].IsUint()) {
+        unsigned int tid = doc[attr].GetUint();
+        pKey<<tid;
+      }
+      else if (doc[attr].IsInt()) {
+        int tid = doc[attr].GetInt();
+        pKey<<tid;
+      }
+    }
+    else if (doc[attr].IsString()) {
+      const char* tid = doc[attr].GetString();
+      pKey<<tid;
+    }
+    else if(doc[attr].IsBool()) {
+      bool tid = doc[attr].GetBool();
+      pKey<<tid;
+    }
+
+    return pKey.str();
+  }
+  static bool PushResult(std::vector<std::string>& value_list, std::string& val, std::string& t, bool isQ)
+  {
+	  //return false;
+	  if(val.empty())
+		  return true;
+
+	  //std::cout<<isQ<<" "<<val;
+
+	  if(isQ)
+	  {
+
+		  //return true;
+
+		  rapidjson::Document doc;
+
+		  doc.Parse<0>(val.data());
+
+		  std::string uid = GetAttr(doc, "UserId");
+
+		  if(uid.empty())
+			  return true;
+
+		  std::string tmax = GetAttr(doc, "Tmax");
+
+
+
+		  long tmaxl = std::stol(tmax);
+
+		  long tl = std::stol(t);
+
+		  if(tl<=tmaxl)
+			  value_list.push_back(uid);
+
+		  //std::string tnow = GetAttr(doc, "Tnow");
+
+//		  if(val.at(0)=='Q')
+//		  {
+//			  std::string qval = val.substr(1);
+//			  value_list.push_back(val);
+//		  }
+		  //return uid;
+
+	  }
+	  else
+	  {
+		  rapidjson::Document doc;
+
+		  doc.Parse<0>(val.data());
+
+		  std::string uid = GetAttr(doc, "EventId");
+
+		  std::string tnow = GetAttr(doc, "Tnow");
+
+		  long tnowl = std::stol(tnow);
+
+		  long tl = std::stol(t);
+
+//		  if(tnowl<tl)
+//			  return false;
+
+		  if(uid.empty())
+			  return true;
+
+		  if(tnowl>=tl)
+			  value_list.push_back(val);
+
+//		  if(val.at(0)=='D')
+//		  {
+//			  std::string qval = val.substr(1);
+//			  value_list.push_back(val);
+//		  }
+
+	  }
+
+	  return true;
+
+  }
 
   // Extra methods (for testing) that are not in the public DB interface
 
@@ -215,8 +343,8 @@ class DBImpl : public DB {
 
   //Continuous Query DB
 
-  DB *datadb;
-  DB *querydb;
+//  DB *datadb;
+//  DB *querydb;
 
 
   // No copying allowed

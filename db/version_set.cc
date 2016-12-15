@@ -266,6 +266,7 @@ enum SaverState {
   kFound,
   kDeleted,
   kCorrupt,
+
 };
 struct Saver {
   SaverState state;
@@ -273,6 +274,17 @@ struct Saver {
   Slice user_key;
   std::string* value;
 };
+
+//struct SaverDQ {
+//  SaverState state;
+//  const Comparator* ucmp;
+//  Slice user_key_d;
+//  Slice user_key_q;
+//  std::string* value_q;
+//  std::string* value_d;
+//};
+
+
 }
 static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
     //std::ofstream outputFile;
@@ -291,6 +303,24 @@ static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
     }
   }
 }
+
+//static void SaveValueDQ(void* arg, const Slice& ikeyd, const Slice& v) {
+//    //std::ofstream outputFile;
+//    //outputFile.open("/Users/nakshikatha/Desktop/test codes/Test_Baseline_db/debug.txt", std::ofstream::out | std::ofstream::app);
+//    //outputFile<<"savevalue : "<<ikey.ToString()<<"\n"<<v.ToString()<<"\n";
+//  SaverDQ* s = reinterpret_cast<SaverDQ*>(arg);
+//  ParsedInternalKey parsed_key;
+//  if (!ParseInternalKey(ikey, &parsed_key)) {
+//    s->state = kCorrupt;
+//  } else {
+//    if (s->ucmp->Compare(parsed_key.user_key, s->user_key) == 0) {
+//      s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
+//      if (s->state == kFound) {
+//        s->value->assign(v.data(), v.size());
+//      }
+//    }
+//  }
+//}
 
 static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
@@ -530,7 +560,7 @@ std::string V_GetAttr(const rapidjson::Document& doc, const char* attr) {
 }
  
 Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector<std::string>& value,
-        GetStats* stats, std::string secKey, int kNoOfOutputs)
+        GetStats* stats,std::string& t, bool isQeury, int kNoOfOutputs)
 {
     
     //std::ofstream outputFile;
@@ -561,24 +591,24 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
 
     // Get the list of files to search in this level
     FileMetaData* const* files = &files_[level][0];
-    //if (level == 0) {
+    if (level == 0) {
       // Level-0 files may overlap each other.  Find all files that
       // overlap user_key and process them in order from newest to oldest.
       tmp.reserve(num_files);
       for (uint32_t i = 0; i < num_files; i++) {
         FileMetaData* f = files[i];
-        //if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
-        //    ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
+        if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
+            ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
           tmp.push_back(f);
-        //}
+        }
       }
       if (tmp.empty()) continue;
 
       std::sort(tmp.begin(), tmp.end(), NewestFirst);
       files = &tmp[0];
       num_files = tmp.size();
-    //} 
-    /*else {
+    }
+    else {
       // Binary search to find earliest index whose largest key >= ikey.
       uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
       if (index >= num_files) {
@@ -596,8 +626,7 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
         }
       }
     }
-     * 
-        */
+
       //outputFile<<num_files<<endl;
     //bool found = false;
     std::string val;
@@ -636,12 +665,13 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
             rapidjson::Document key_list;
 
             key_list.Parse<0>(val.c_str());
-            rapidjson::SizeType i = key_list.Size() - 1;
+            rapidjson::SizeType len = key_list.Size();
+            unsigned i = 0;
             //outputFile<<i<<"\n";
             // read requested number of records from primary db
 
 //            while (kNoOfOutputs > 0 && (int)i >= 0) {
-            while ((int)i >= 0)
+            while (i < len )
             {
                 std::string pkey = V_GetVal(key_list[i]);
 
@@ -649,12 +679,14 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
 				// check for updated values
 
 				//outputFile<<user_key.ToString()<<" ukey\n"<<secKey.c_str()<<std::endl;
-
-				value.push_back(pkey);
+                bool f = DBImpl::PushResult(value, pkey, t, isQeury);
+                if(f==false)
+                	return s;
+				//value.push_back(pkey);
 
 				//kNoOfOutputs--;
 
-                i--;
+                i++;
 
             }
             
@@ -683,6 +715,366 @@ Status Version::Get( const ReadOptions& options, const LookupKey& k, std::vector
    return s;
 }
 
+
+Status Version::Get( const ReadOptions& options, const LookupKey& kq,const LookupKey& kd, std::vector<std::string>& users, std::vector<std::string>& events,
+          std::string& tnow,std::string& tmin,  GetStats* stats)
+{
+//	Status s = this->Get(options, kq, users, stats, tnow, true, 0);
+//	//std::cout<<kq.user_key().ToString()<<" "<<users.size()<<std::endl;
+//	s = this->Get(options, kd, events, stats, tmin, false, 0);
+//	//std::cout<<kd.user_key().ToString()<<" "<<events.size()<<std::endl;
+//	return s;
+	  const Comparator* ucmp = vset_->icmp_.user_comparator();
+	  Status s;
+
+	  stats->seek_file = NULL;
+	  stats->seek_file_level = -1;
+	  FileMetaData* last_file_read = NULL;
+	  int last_file_read_level = -1;
+
+	  std::vector<FileMetaData*> tmp;
+
+
+
+	  FileMetaData* tmp2;
+	  int valueSize = 0;
+
+	  Slice ikeyq = kq.internal_key();
+	  Slice user_keyq = kq.user_key();
+
+	  Slice ikeyd = kd.internal_key();
+  	  Slice user_keyd = kd.user_key();
+
+
+
+	  for (int level = 0; level < config::kNumLevels; level++) {
+
+
+		int *flag;
+
+
+		size_t num_files = files_[level].size();
+	    if (num_files == 0) continue;
+
+
+	    FileMetaData* const* files = &files_[level][0];
+	    if (level == 0) {
+
+	      flag = new int [num_files];
+
+	      tmp.reserve(num_files);
+	      for (uint32_t i = 0; i < num_files; i++) {
+	        FileMetaData* f = files[i];
+	        int q = 0, d = 0;
+	        if (ucmp->Compare(user_keyq, f->smallest.user_key()) >= 0 &&
+	            ucmp->Compare(user_keyq, f->largest.user_key()) <= 0)
+	        {
+	        	tmp.push_back(f);
+	        	q=1;
+	        	flag[i]=1;
+	        }
+
+	        if(ucmp->Compare(user_keyd, f->smallest.user_key()) >= 0 &&
+		            ucmp->Compare(user_keyd, f->largest.user_key()) <= 0)
+	        {
+	        	if(q==1)
+	        		flag[i]=3;
+	        	else
+	        	{
+	        		flag[i]=2;
+	        		tmp.push_back(f);
+	        	}
+	        }
+
+	        if(q==0&&d==0)
+	        {
+	        	flag[i]=0;
+	        }
+
+
+	      }
+	      if (tmp.empty()) continue;
+
+	      //std::sort(tmp.begin(), tmp.end(), NewestFirst);
+	      files = &tmp[0];
+	      num_files = tmp.size();
+	    }
+	    else {
+
+	      // Binary search to find earliest index whose largest key >= ikey.
+	      uint32_t indexd = FindFile(vset_->icmp_, files_[level], ikeyq);
+	      uint32_t indexq = FindFile(vset_->icmp_, files_[level], ikeyd);
+	      size_t tempno = num_files;
+	      flag = new int [2];
+	      num_files = 0;
+	      tmp.reserve(2);
+	      if(indexd==indexq)
+	      {
+	   	      if (indexd >= tempno) {
+				//files = NULL;
+				//num_files = 0;
+			  }
+	   	      else
+	   	      {
+				tmp2 = files[indexd];
+				if (ucmp->Compare(user_keyd, tmp2->smallest.user_key()) < 0 && ucmp->Compare(user_keyq, tmp2->smallest.user_key()) < 0)
+				{
+				  // All of "tmp2" is past any data for user_key
+				  //files = NULL;
+				  //num_files = 0;
+				}
+				else
+				{
+				  //files = &tmp2;
+					tmp.push_back(tmp2);
+					flag[num_files] = 3;
+
+					num_files++;
+				}
+			  }
+
+	      }
+	      else
+	      {
+
+
+
+
+	    	  if (indexd >= tempno) {
+				//files = NULL;
+				//num_files = 0;
+			  }
+			  else
+			  {
+				tmp2 = files[indexd];
+				if (ucmp->Compare(user_keyd, tmp2->smallest.user_key()) < 0)
+				{
+				  // All of "tmp2" is past any data for user_key
+				  //files = NULL;
+				  //num_files = 0;
+
+				}
+				else
+				{
+				  tmp.push_back(tmp2);
+				  flag[num_files] = 2;
+				  num_files++;
+				}
+			  }
+
+	    	  if (indexq >= tempno) {
+				//files = NULL;
+				//num_files = 0;
+			  }
+			  else
+			  {
+				tmp2 = files[indexq];
+				if (ucmp->Compare(user_keyq, tmp2->smallest.user_key()) < 0)
+				{
+				  // All of "tmp2" is past any data for user_key
+				  //files = NULL;
+				  //num_files = 0;
+				}
+				else
+				{
+					tmp.push_back(tmp2);
+					flag[num_files] = 1;
+					num_files++;
+				}
+			  }
+
+
+	      }
+
+	      if (tmp.empty()) continue;
+
+		  //std::sort(tmp.begin(), tmp.end(), NewestFirst);
+		  files = &tmp[0];
+		  num_files = tmp.size();
+
+	    }
+
+
+
+	    std::string val_d, val_q;
+	    for (uint32_t i = 0; i < num_files; ++i) {
+	      if (last_file_read != NULL && stats->seek_file == NULL) {
+
+	        stats->seek_file = last_file_read;
+	        stats->seek_file_level = last_file_read_level;
+	      }
+
+	      FileMetaData* f = files[i];
+	      last_file_read = f;
+	      last_file_read_level = level;
+
+//	      if(flag[i] == 3)
+//	      {
+
+	      Saver saver_q;
+	      saver_q.state = kNotFound;
+	      saver_q.ucmp = ucmp;
+	      saver_q.user_key = user_keyq;
+	      saver_q.value = &val_q;
+
+	      Saver saver_d;
+	      saver_d.state = kNotFound;
+	      saver_d.ucmp = ucmp;
+	      saver_d.user_key = user_keyd;
+	      saver_d.value = &val_d;
+
+	      if(flag[i]==3)
+	      {
+
+			  s = vset_->table_cache_->Get(options, f->number, f->file_size, ikeyq, ikeyd, &saver_q,&saver_d, SaveValue);
+
+			  if(saver_q.state == kFound)
+			  {
+
+
+				{
+
+					rapidjson::Document key_list;
+
+					key_list.Parse<0>(val_q.c_str());
+					rapidjson::SizeType len = key_list.Size();
+					unsigned i = 0;
+
+					while (i < len )
+					{
+						std::string pkey = V_GetVal(key_list[i]);
+
+
+						bool f = DBImpl::PushResult(users, pkey, tnow, true);
+						if(f==false)
+							return s;
+
+						i++;
+
+					}
+
+
+				}
+			 }
+
+
+
+			  if(saver_d.state == kFound)
+			  {
+
+
+				{
+
+					rapidjson::Document key_list;
+
+					key_list.Parse<0>(val_d.c_str());
+					rapidjson::SizeType len = key_list.Size();
+					unsigned i = 0;
+
+					while (i < len )
+					{
+						std::string pkey = V_GetVal(key_list[i]);
+
+
+						bool f = DBImpl::PushResult(events, pkey, tmin, false);
+						if(f==false)
+							return s;
+
+						i++;
+
+					}
+
+
+				}
+			 }
+
+	      }
+	      else if(flag[i] == 2)
+	      {
+	    	  s = vset_->table_cache_->Get(options, f->number, f->file_size, ikeyd, &saver_d, SaveValue);
+
+			  if(s.ok() & !s.IsNotFound() && saver_d.state == kFound)
+			  {
+
+
+				{
+
+					rapidjson::Document key_list;
+
+					key_list.Parse<0>(val_d.c_str());
+					rapidjson::SizeType len = key_list.Size();
+					unsigned i = 0;
+
+					while (i < len )
+					{
+						std::string pkey = V_GetVal(key_list[i]);
+
+
+						bool f = DBImpl::PushResult(events, pkey, tmin, false);
+						if(f==false)
+							return s;
+
+						i++;
+
+					}
+
+
+				}
+			 }
+
+	      }
+	      else if(flag[i]==1)
+	      {
+
+
+			  s = vset_->table_cache_->Get(options, f->number, f->file_size, ikeyq, &saver_q, SaveValue);
+
+			  if(s.ok() & !s.IsNotFound() && saver_q.state == kFound)
+			  {
+
+
+				{
+
+					rapidjson::Document key_list;
+
+					key_list.Parse<0>(val_q.c_str());
+					rapidjson::SizeType len = key_list.Size();
+					unsigned i = 0;
+
+					while (i < len )
+					{
+						std::string pkey = V_GetVal(key_list[i]);
+
+
+						bool f = DBImpl::PushResult(users, pkey, tnow, true);
+						if(f==false)
+							return s;
+
+						i++;
+
+					}
+
+
+				}
+			 }
+
+
+	      }
+
+
+
+
+	    }
+
+	    delete flag;
+	    tmp.clear();
+
+	  }
+
+
+
+	   return s;
+}
 
 bool Version::UpdateStats(const GetStats& stats) {
   FileMetaData* f = stats.seek_file;

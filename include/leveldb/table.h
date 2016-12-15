@@ -71,6 +71,10 @@ class Table {
       void* arg,
       void (*handle_result)(void* arg, const Slice& k, const Slice& v));
 
+  Status InternalGet(
+        const ReadOptions&, const Slice& keyq, const Slice& keyd,
+        void* argq, void*argd,
+        void (*handle_result)(void* arg, const Slice& k, const Slice& v));
 
   void ReadMeta(const Footer& footer);
   void ReadFilter(const Slice& filter_handle_value);

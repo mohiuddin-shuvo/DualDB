@@ -34,8 +34,7 @@
 #include "util/mutexlock.h"
 
 #include <string>
-#include <sstream>
-#include <fstream>
+
 
 #include <iostream>
 
@@ -118,11 +117,11 @@ Options SanitizeOptions(const std::string& dbname,
   }
 
  
-  if (src.using_s_index) {
-    result.using_s_index = true;
-    result.primary_key = src.primary_key;
-    result.secondary_key = src.secondary_key;
-  }
+//  if (src.using_s_index) {
+//    result.using_s_index = true;
+//    result.primary_key = src.primary_key;
+//    result.secondary_key = src.secondary_key;
+//  }
 
   return result;
 }
@@ -190,9 +189,9 @@ DBImpl::~DBImpl() {
   }
 
 
-  if (options_.using_s_index) {
-    delete querydb;
-  }
+//  if (options_.using_s_index) {
+//    delete querydb;
+//  }
 
 }
 //
@@ -200,45 +199,6 @@ DBImpl::~DBImpl() {
 
 
 
-std::string GetAttr(const rapidjson::Document& doc, const char* attr) {
-  if(!doc.IsObject() || !doc.HasMember(attr) || doc[attr].IsNull())
-    return "";
-
-  std::ostringstream pKey;
-
-  if(doc[attr].IsNumber()) {
-    if(doc[attr].IsUint64()) {
-      unsigned long long int tid = doc[attr].GetUint64();
-      pKey<<tid;
-    }
-    else if (doc[attr].IsInt64()) {
-      long long int tid = doc[attr].GetInt64();
-      pKey<<tid;
-    }
-    else if (doc[attr].IsDouble()) {
-      double tid = doc[attr].GetDouble();
-      pKey<<tid;
-    }
-    else if (doc[attr].IsUint()) {
-      unsigned int tid = doc[attr].GetUint();
-      pKey<<tid;
-    }
-    else if (doc[attr].IsInt()) {
-      int tid = doc[attr].GetInt();
-      pKey<<tid;
-    }
-  }
-  else if (doc[attr].IsString()) {
-    const char* tid = doc[attr].GetString();
-    pKey<<tid;
-  }
-  else if(doc[attr].IsBool()) {
-    bool tid = doc[attr].GetBool();
-    pKey<<tid;
-  }
-
-  return pKey.str();
-}
 
  std::string GetVal(const rapidjson::Value& val) {
 
@@ -968,7 +928,7 @@ bool CheckifExpired(std::string json_value)
 
 	long int tnow= time(NULL);
 
-	std::string tmaxs = GetAttr(document, "Tmax");
+	std::string tmaxs = DBImpl::GetAttr(document, "Tmax");
 	if(tmaxs.empty())
 			return false;
 	long tmax = std::stol(tmaxs);
@@ -1630,9 +1590,307 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
   return DB::Delete(options, key);
 }
 
-
+//PUBLISH
 //Continuous query DB
 Status DBImpl::PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& listofUsers)
+{
+	//std::string st = "D" ;
+	//st+= json_value.data();
+
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tnow = GetAttr(val, "Tnow");
+
+	if(tnow.empty())
+		return Status::NotFound("Bad format");
+
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	keyd += "D";
+
+	keyq += "Q";
+
+    Slice skeyd = keyd;
+    Slice skeyq = keyq;
+    //std::vector<std::string> listofUsers;
+
+	//Slice sst = st;
+
+	Status s;
+
+    s = this->GetAllUsers(skeyq, tnow, listofUsers);
+
+    s = this->Put(options, skeyd, json_value);
+
+    return s;
+
+}
+
+Status DBImpl::GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& users)
+{
+//	std::vector<std::string> listofusersJson;
+
+	Status s = this->Get(ReadOptions(), key, users, tnow, true);
+
+	//Extract UserIDs from the list
+//	for(int i=0; i< listofusersJson.size(); i++)
+//	{
+//		rapidjson::Document val;
+//
+//		std::string s = listofusersJson[i];
+//
+//		val.Parse<0>(s.c_str());
+//
+//		std::string user = GetAttr(val, "UserId");
+//
+//		if(!user.empty())
+//			users.push_back(user);
+//	}
+
+	return s;
+}
+
+//This function is only called from EventsDB
+
+Status DBImpl::GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results)
+{
+	//std::vector<std::string> listofeventsJson;
+
+	Status s = this->Get(options, key, results, tmin, false);
+
+
+	//TO do Filter Results with tmin
+//	for(int i=0; i< listofeventsJson.size(); i++)
+//	{
+//		rapidjson::Document val;
+//
+//		std::string s = listofeventsJson[i];
+//
+//		val.Parse<0>(s.c_str());
+//
+//		std::string event = GetAttr(val, "EventId");
+//
+//		if(!event.empty())
+//			results.push_back(event);
+//	}
+
+
+	return s;
+}
+
+Status DBImpl::GetBaseComplexQuery(const ReadOptions& roptions,
+           const Slice& key, const Slice& json_value, std::vector<std::string>& users, std::vector<std::string>& events)
+{
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tmin = GetAttr(val, "Tmin");
+	std::string tmax = GetAttr(val, "Tmax");
+	std::string tnow = GetAttr(val, "Tnow");
+
+	Status s;
+	if(tmin.empty())
+				return Status::NotFound("Bad format");
+
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	keyd += "D";
+
+	keyq += "Q";
+
+	Slice skeyd = keyd;
+	Slice skeyq = keyq;
+
+
+	if(tnow>tmin)
+	{
+		s = this->Get(roptions, skeyq, skeyd, users, events, tnow, tmin);
+	}
+	else
+	{
+		s = this->GetAllUsers(keyq, tnow, users);
+	}
+	if(tnow<tmax)
+	{
+		s = this->Put(WriteOptions(), skeyq, json_value);
+	}
+
+	return s;
+}
+
+Status DBImpl::Get(const ReadOptions& options,
+                     const Slice& keyq,const Slice& keyd, std::vector<std::string>& users,  std::vector<std::string>& events, std::string& tnow, std::string& tmin)
+{
+	  Status s;
+
+	  MutexLock l(&mutex_);
+	  SequenceNumber snapshot;
+	  if (options.snapshot != NULL) {
+	    snapshot = reinterpret_cast<const SnapshotImpl*>(options.snapshot)->number_;
+	  } else {
+	    snapshot = versions_->LastSequence();
+	  }
+
+	  MemTable* mem = mem_;
+	  MemTable* imm = imm_;
+	  Version* current = versions_->current();
+	  mem->Ref();
+	  if (imm != NULL) imm->Ref();
+	  current->Ref();
+
+	  bool have_stat_update = false;
+	  Version::GetStats stats;
+
+
+	  {
+	    mutex_.Unlock();
+
+	    //Data
+
+	    LookupKey lkeyd(keyd, snapshot);
+
+	    rapidjson::Document mem_key_list,imm_key_list,sst_key_list;
+	    std::string mem_value,imm_value;
+
+
+	    if(mem->Get(lkeyd, &mem_value, &s))
+	    {
+	        mem_key_list.Parse<0>(mem_value.c_str());
+
+	        int i = mem_key_list.Size() - 1;
+
+	        while ( i >= 0)
+	        {
+				std::string pkey = GetVal(mem_key_list[i]);
+
+
+				bool f = PushResult(events, pkey , tmin, false);
+
+				if(!f)
+					return s;
+
+				i--;
+
+	        }
+	    }
+
+
+
+
+
+
+	    if(imm != NULL)
+	    {
+	    	if(imm->Get(lkeyd, &imm_value, &s))
+	    	{
+	    		imm_key_list.Parse<0>(imm_value.c_str());
+
+				int i = imm_key_list.Size() - 1;
+
+				while ( i >= 0)
+				{
+					std::string pkey = GetVal(imm_key_list[i]);
+
+
+
+					bool f = PushResult(events, pkey , tmin, false);
+
+					if(!f)
+						return s;
+
+					i--;
+
+				}
+	    	 }
+
+	    }
+
+	    //Query
+
+	    LookupKey lkeyq(keyq, snapshot);
+
+	    //rapidjson::Document mem_key_list,imm_key_list,sst_key_list;
+	    //std::string mem_value,imm_value;
+
+
+	    if(mem->Get(lkeyq, &mem_value, &s))
+	    {
+	        mem_key_list.Parse<0>(mem_value.c_str());
+
+	        int i = mem_key_list.Size() - 1;
+
+	        while ( i >= 0)
+	        {
+				std::string pkey = GetVal(mem_key_list[i]);
+
+
+				bool f = PushResult(users, pkey , tnow, true);
+
+				if(!f)
+					return s;
+
+				i--;
+
+	        }
+	    }
+
+
+
+
+
+
+	    if(imm != NULL)
+	    {
+	    	if(imm->Get(lkeyq, &imm_value, &s))
+	    	{
+	    		imm_key_list.Parse<0>(imm_value.c_str());
+
+				int i = imm_key_list.Size() - 1;
+
+				while ( i >= 0)
+				{
+					std::string pkey = GetVal(imm_key_list[i]);
+
+
+
+					bool f = PushResult(users, pkey , tnow, true);
+
+					if(!f)
+						return s;
+
+					i--;
+
+				}
+	    	 }
+
+	    }
+
+
+
+	    ///////////////////////////////////////
+
+	    s = current->Get(options, lkeyq, lkeyd, users, events, tnow, tmin, &stats);
+
+
+	    mutex_.Lock();
+
+	  }
+
+
+	  mem->Unref();
+	  if (imm != NULL) imm->Unref();
+	  current->Unref();
+	  //outputFile.close();
+	  return s;
+
+
+}
+
+Status DBImpl::PutBaseComplexQuery(const WriteOptions& options,
+        const Slice& key, const Slice& json_value, std::vector<std::string>& users, std::vector<std::string>& events)
 {
 	rapidjson::Document val;
 
@@ -1640,56 +1898,36 @@ Status DBImpl::PutC(const WriteOptions& options, const Slice& key, const Slice& 
 
 	std::string tnow = GetAttr(val, "Tnow");
 
-    //std::vector<std::string> listofUsers;
+	if(tnow.empty())
+		return Status::NotFound("Bad format");
+	//std::vector<std::string> listofUsers;
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	keyd += "D";
 
+	keyq += "Q";
+
+	Slice skeyd = keyd;
+	Slice skeyq = keyq;
+	//Slice sst = st;
+	std::string tmin ="0";
 	Status s;
 
-    s = this->querydb->GetAllUsers(key, tnow, listofUsers);
+	s = this->Get(ReadOptions(), skeyq, skeyd, users, events, tnow, tmin);
 
-    s = this->Put(options, key, json_value);
+	s = this->Put(options, skeyd, json_value);
 
-    return s;
-
-}
-
-//This function is only called from QueryDB
-Status DBImpl::GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& users)
-{
-	std::vector<std::string> listofusersJson;
-
-	this->Get(ReadOptions(), key, listofusersJson);
-
-	//Extract UserIDs from the list
-	for(int i=0; i< listofusersJson.size(); i++)
-	{
-		rapidjson::Document val;
-
-		std::string s = listofusersJson[i];
-
-		val.Parse<0>(s.c_str());
-
-		std::string user = GetAttr(val, "UserId");
-
-		users.push_back(user);
-	}
-
-	return Status::OK();
-}
-
-//This function is only called from EventsDB
-
-Status DBImpl::GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results)
-{
-	//TO do Filter Results with tmin
-	
-	Status s = this->Get(options, key, results);
+	//s = this->Get(ReadOptions(), key, users, events, tnow, tmin);
 
 	return s;
+
 }
 
+//SUBSCRIBE
 
 Status DBImpl::GetC(const ReadOptions& roptions, const Slice& key, const Slice& json_value, std::vector<std::string>& events)
 {
+
 	rapidjson::Document val;
 
 	val.Parse<0>(json_value.data());
@@ -1700,20 +1938,33 @@ Status DBImpl::GetC(const ReadOptions& roptions, const Slice& key, const Slice& 
 
     Status s;
 
+    if(tmin.empty())
+    		return Status::NotFound("Bad format");
+        //std::vector<std::string> listofUsers;
+
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	keyd += "D";
+
+	keyq += "Q";
+
+    Slice skeyd = keyd;
+    Slice skeyq = keyq;
+
     if(tnow>tmin)
     {
-        s = this->GetAllEvents(roptions, key, tmin , events);
+        s = this->GetAllEvents(roptions, skeyd, tmin , events);
     }
     if(tnow<tmax)
     {
-        s = this->querydb->Put(WriteOptions(), key, json_value);
+        s = this->Put(WriteOptions(), skeyq, json_value);
     }
 
     return s;
 }
 
 
- 
+/*
 Status DBImpl::Put(const WriteOptions& options, const Slice& value) {
   
   rapidjson::Document json_val;
@@ -1745,10 +1996,13 @@ Status DBImpl::Put(const WriteOptions& options, const Slice& value) {
 
 }
  
+ */
 //*******************************************************************************************
 //
 
-Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std::string>& value_list) {
+
+
+Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std::string>& value_list,std::string& t, bool isQuery) {
     
 //std::ofstream outputFile;
 //outputFile.open("/Users/nakshikatha/Desktop/test codes/debug3.txt", std::ofstream::out | std::ofstream::app);
@@ -1762,7 +2016,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std
   } else {
     snapshot = versions_->LastSequence();
   }
-  
+
   MemTable* mem = mem_;
   MemTable* imm = imm_;
   Version* current = versions_->current();
@@ -1799,7 +2053,11 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std
 
 			//outputFile<<pkey<<" -> "<<pValue<<"\n"<<skey.ToString()<<" == "<< GetAttr(temp_val, this->options_.secondary_key.c_str())<<"\n";
 
-			value_list.push_back(pkey);
+			//std::cout<<pkey;
+			bool f = PushResult(value_list, pkey , t, isQuery);
+			if(!f)
+				return s;
+			//value_list.push_back(pkey);
 
 			i--;
 
@@ -1825,6 +2083,12 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std
 
 				//outputFile<<pkey<<" -> "<<pValue<<"\n"<<skey.ToString()<<" == "<< GetAttr(temp_val, this->options_.secondary_key.c_str())<<"\n";
 
+
+				bool f = PushResult(value_list, pkey ,t, isQuery);
+
+				if(!f)
+					return s;
+
 				value_list.push_back(pkey);
 
 				i--;
@@ -1841,7 +2105,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std
     {
         //outputFile<<"sstget\n";
     	//s = current->Get(options, lkey, value_list, &stats, this->options_.secondary_key, kNoOfOutputs,db,&resultSetofKeysFound);
-    	s = current->Get(options, lkey, value_list, &stats, this->options_.secondary_key, 0);
+    	s = current->Get(options, lkey, value_list, &stats, t, isQuery , 0);
 
 
     	//outputFile<<"in\n";
@@ -2150,7 +2414,7 @@ DB::~DB() { }
 //Continuous Query DB
 
 Status DB::Open(const Options& options, const std::string& dbname,
-                DB** dbptr,DB* qDbOfdDb) {
+                DB** dbptr) {
   *dbptr = NULL;
 
   DBImpl* impl = new DBImpl(options, dbname);
@@ -2168,8 +2432,8 @@ Status DB::Open(const Options& options, const std::string& dbname,
       impl->logfile_number_ = new_log_number;
       impl->log_ = new log::Writer(lfile);
       s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
-      if(options.isQueryDB&&qDbOfdDb!= NULL)
-          impl->datadb = qDbOfdDb;
+//      if(options.isQueryDB&&qDbOfdDb!= NULL)
+//          impl->datadb = qDbOfdDb;
           
     }
     if (s.ok()) {
@@ -2184,22 +2448,22 @@ Status DB::Open(const Options& options, const std::string& dbname,
     delete impl;
   }
   
-  if (s.ok() && options.using_s_index) {
-    std::string sdbname = dbname + "/_QueryDB";
-
-    Options soption;
-    soption.create_if_missing = true;
-    soption.using_s_index  = false;
- 
-    soption.isQueryDB = true;
-    //soption.primary_key = options.primary_key ;
-    //soption.secondary_key = options.secondary_key ;
-    
-    Status sstatus = DB::Open(soption, sdbname, &impl->querydb, *dbptr);
-    
-    // return any errors, secondary db errors first
-    return sstatus.ok() ? s : sstatus;
-  }
+//  if (s.ok() && options.using_s_index) {
+//    std::string sdbname = dbname + "/_QueryDB";
+//
+//    Options soption;
+//    soption.create_if_missing = true;
+//    soption.using_s_index  = false;
+//
+//    soption.isQueryDB = true;
+//    //soption.primary_key = options.primary_key ;
+//    //soption.secondary_key = options.secondary_key ;
+//
+//    Status sstatus = DB::Open(soption, sdbname, &impl->querydb, *dbptr);
+//
+//    // return any errors, secondary db errors first
+//    return sstatus.ok() ? s : sstatus;
+//  }
 
   return s;
 }
