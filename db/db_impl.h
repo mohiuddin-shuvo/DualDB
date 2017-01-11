@@ -62,18 +62,24 @@ class DBImpl : public DB {
 //                     const Slice& key, std::vector<KeyValuePair>* value_list, DB* db);
 
   //Continuous Query DB
-  virtual Status PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users);
+  virtual Status Publish(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users);
 
-  virtual Status GetC(const ReadOptions& options,
+  virtual Status Subscribe(const ReadOptions& options,
                      const Slice& key, const Slice& value, std::vector<std::string>& events);
+  
+  virtual Status PublishInDewey(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users);
+
+  virtual Status SubscribeInDewey(const ReadOptions& options,
+		  const Slice& key, const Slice& value, std::vector<std::string>& events);
+  
 
   virtual Status GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& results);
   virtual Status GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results);
 
-  virtual Status GetBaseComplexQuery(const ReadOptions& options,
+  virtual Status SubscribeAndSelfJoin(const ReadOptions& options,
              const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events);
 
-  virtual Status PutBaseComplexQuery(const WriteOptions& options,
+  virtual Status PublishAndSelfJoin(const WriteOptions& options,
                const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events);
 
   static std::string GetAttr(const rapidjson::Document& doc, const char* attr) {

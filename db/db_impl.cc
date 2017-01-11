@@ -1592,7 +1592,7 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
 
 //PUBLISH
 //Continuous query DB
-Status DBImpl::PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& listofUsers)
+Status DBImpl::Publish(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& listofUsers)
 {
 	//std::string st = "D" ;
 	//st+= json_value.data();
@@ -1627,6 +1627,109 @@ Status DBImpl::PutC(const WriteOptions& options, const Slice& key, const Slice& 
     return s;
 
 }
+std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
+
+std::vector<std::string> split(const std::string &s, char delim) {
+    std::vector<std::string> elems;
+    split(s, delim, elems);
+    return elems;
+}
+
+std::string GetNextNumberInDewey(std::string lowkey)
+{
+	std::vector<std::string> x = split(lowkey, '.');
+	int num = 0;
+	std::string::size_type sz;   // alias of size_t
+	if(x.size()>0)
+		  num = std::stoi (x[x.size()-1], &sz);
+	else 
+		return "";
+	num++;
+	std::string highkey= "";
+	for(int i =0; i< x.size()-1; i++)
+	{
+		highkey+=x[i];
+		highkey+=".";
+	}
+	 
+	highkey=std::to_string(num);
+	
+	return highkey;
+}
+
+
+Status DBImpl::PublishInDewey(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& listofUsers)
+{
+	//std::string st = "D" ;
+	//st+= json_value.data();
+
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tnow = GetAttr(val, "Tnow");
+
+	if(tnow.empty())
+		return Status::NotFound("Bad format");
+
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	
+	std::string highkey = GetNextNumberInDewey(keyq);
+	highkey+="Q";
+	
+	keyd += "D";
+
+	keyq += "Q";
+
+    Slice skeyd = keyd;
+    Slice startkey = keyq;
+    Slice endkey = highkey;
+    //std::vector<std::string> listofUsers;
+
+	//Slice sst = st;
+
+	Status s;
+
+    //s = this->GetAllUsers(skeyq, tnow, listofUsers);
+
+	//GET ALL SUBSCRIBERS WITHIN DEWEY HIARARCHY
+	
+	Iterator* it = this->NewIterator( leveldb::ReadOptions());
+    for (it->Seek(startkey); it->Valid(); it->Next()) 
+    {
+        
+        leveldb::Slice cell = it->key();
+        //outputFile<<key.ToString()<<"\n";
+        if( cell.ToString().compare(endkey.ToString()) > 0) 
+        {
+        // key > end
+            break;
+        
+        } 
+        else 
+        {
+        
+        	if(cell.ToString().back()=='Q')
+        		s = this->GetAllUsers(cell, tnow, listofUsers);         
+
+        }
+    }
+   
+	
+    s = this->Put(options, skeyd, json_value);
+
+    return s;
+
+}
+
 
 Status DBImpl::GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& users)
 {
@@ -1680,7 +1783,7 @@ Status DBImpl::GetAllEvents(const ReadOptions& options,const Slice& key, std::st
 	return s;
 }
 
-Status DBImpl::GetBaseComplexQuery(const ReadOptions& roptions,
+Status DBImpl::SubscribeAndSelfJoin(const ReadOptions& roptions,
            const Slice& key, const Slice& json_value, std::vector<std::string>& users, std::vector<std::string>& events)
 {
 	rapidjson::Document val;
@@ -1889,7 +1992,7 @@ Status DBImpl::Get(const ReadOptions& options,
 
 }
 
-Status DBImpl::PutBaseComplexQuery(const WriteOptions& options,
+Status DBImpl::PublishAndSelfJoin(const WriteOptions& options,
         const Slice& key, const Slice& json_value, std::vector<std::string>& users, std::vector<std::string>& events)
 {
 	rapidjson::Document val;
@@ -1925,7 +2028,7 @@ Status DBImpl::PutBaseComplexQuery(const WriteOptions& options,
 
 //SUBSCRIBE
 
-Status DBImpl::GetC(const ReadOptions& roptions, const Slice& key, const Slice& json_value, std::vector<std::string>& events)
+Status DBImpl::Subscribe(const ReadOptions& roptions, const Slice& key, const Slice& json_value, std::vector<std::string>& events)
 {
 
 	rapidjson::Document val;
@@ -1954,6 +2057,79 @@ Status DBImpl::GetC(const ReadOptions& roptions, const Slice& key, const Slice& 
     if(tnow>tmin)
     {
         s = this->GetAllEvents(roptions, skeyd, tmin , events);
+    }
+    if(tnow<tmax)
+    {
+        s = this->Put(WriteOptions(), skeyq, json_value);
+    }
+
+    return s;
+}
+Status DBImpl::SubscribeInDewey(const ReadOptions& roptions, const Slice& key, const Slice& json_value, std::vector<std::string>& events)
+{
+
+	rapidjson::Document val;
+
+	val.Parse<0>(json_value.data());
+
+	std::string tmin = GetAttr(val, "Tmin");
+    std::string tmax = GetAttr(val, "Tmax");
+    std::string tnow = GetAttr(val, "Tnow");
+
+    Status s;
+
+    if(tmin.empty())
+    		return Status::NotFound("Bad format");
+        //std::vector<std::string> listofUsers;
+
+	std::string keyq = key.data();
+	std::string keyd = keyq;
+	keyd += "D";
+
+	keyq += "Q";
+	
+	
+
+    Slice skeyd = keyd;
+    Slice skeyq = keyq;
+    
+    Slice startkey = keyd;
+    std::string highkey = GetNextNumberInDewey(keyd);
+    highkey+="D";
+    Slice endkey = highkey;
+    //std::vector<std::string> listofUsers;
+
+	//Slice sst = st;
+
+	//Status s;
+   
+    if(tnow>tmin)
+    {
+    	//GET ALL EVENTS WITHIN DEWEY HIARARCHY
+    	
+        //s = this->GetAllEvents(roptions, skeyd, tmin , events);
+    	
+    	Iterator* it = this->NewIterator( leveldb::ReadOptions());
+	    for (it->Seek(startkey); it->Valid(); it->Next()) 
+	    {
+	        
+	        leveldb::Slice cell = it->key();
+	        //outputFile<<key.ToString()<<"\n";
+	        if( cell.ToString().compare(endkey.ToString()) > 0) 
+	        {
+	        // key > end
+	            break;
+	        
+	        } 
+	        else 
+	        {
+	        
+	        	if(cell.ToString().back()=='D')
+	        		s = this->GetAllEvents(roptions, cell, tmin , events);         
+
+	        }
+	    }
+    	
     }
     if(tnow<tmax)
     {

@@ -158,8 +158,8 @@ void test_frombenchmark()
 			gettimeofday(&start, NULL);
 			if(x[0]=="D") {
 
-				leveldb::Status s = db->PutBaseComplexQuery(woptions,key, json_value, users, events );
-				//leveldb::Status s = db->PutC(woptions, key , json_value, users);
+				leveldb::Status s = db->PublishAndSelfJoin(woptions,key, json_value, users, events );
+				//leveldb::Status s = db->Publish(woptions, key , json_value, users);
 
 				gettimeofday(&end, NULL);
 				durationData+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
@@ -184,8 +184,8 @@ void test_frombenchmark()
 			else if(x[0]=="Q")
 			{
 
-				//leveldb::Status s = db->GetC(roptions, key , json_value, events);
-				leveldb::Status s = db->GetBaseComplexQuery(roptions, key , json_value, users, events );
+				//leveldb::Status s = db->Subscribe(roptions, key , json_value, events);
+				leveldb::Status s = db->SubscribeAndSelfJoin(roptions, key , json_value, users, events );
 
 				gettimeofday(&end, NULL);
 				durationQuery+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
@@ -287,8 +287,8 @@ void testingRapidJson ()
  */
 int main(int argc, char** argv) {
 
-	//test_frombenchmark();
-	cout<<"Compile_DualDB!\n";
+	test_frombenchmark();
+	cout<<"Compile_DualDB build new!\n";
 	return 0;
 }
 

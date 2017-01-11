@@ -79,19 +79,25 @@ class DB {
 
    virtual Status Get(const ReadOptions& options,
                        const Slice& skey, std::vector<std::string>& value_list,std::string& t, bool isQuery) = 0;
-   virtual Status  PutC(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users) = 0;
+   virtual Status  Publish(const WriteOptions& options, const Slice& key, const Slice& json_value, std::vector<std::string>& users) = 0;
 
-   virtual Status GetC(const ReadOptions& options,
+   virtual Status Subscribe(const ReadOptions& options,
                       const Slice& key, const Slice& value, std::vector<std::string>& events) = 0;
+   
+   virtual Status PublishInDewey(const WriteOptions& options, const Slice& key, 
+		   const Slice& json_value, std::vector<std::string>& users)=0;
 
+     virtual Status SubscribeInDewey(const ReadOptions& options,
+   		  const Slice& key, const Slice& value, std::vector<std::string>& events)=0;
+     
    virtual Status GetAllUsers(const Slice& key, std::string& tnow, std::vector<std::string>& results) = 0;
 
    virtual Status GetAllEvents(const ReadOptions& options,const Slice& key, std::string& tmin,  std::vector<std::string>& results) = 0;
 
-   virtual Status GetBaseComplexQuery(const ReadOptions& options,
+   virtual Status SubscribeAndSelfJoin(const ReadOptions& options,
               const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events) = 0;
 
-   virtual Status PutBaseComplexQuery(const WriteOptions& options,
+   virtual Status PublishAndSelfJoin(const WriteOptions& options,
                 const Slice& key, const Slice& value, std::vector<std::string>& users, std::vector<std::string>& events) = 0;
   // Set the database entry for "key" to "value".  Returns OK on success,
   // and a non-OK status on error.
