@@ -62,6 +62,7 @@ class MemTable {
   // in *status and return true.
   // Else, return false.
   bool Get(const LookupKey& key, std::string* value, Status* s);
+  int RangeGet(const LookupKey& startkey, std::string& endkey, std::vector<std::string>& value, Status* s, std::string& t, bool isQuery);
 
  private:
   ~MemTable();  // Private since only Unref() should be used to delete it

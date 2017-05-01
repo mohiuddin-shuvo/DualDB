@@ -8,6 +8,10 @@
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
 #include "util/coding.h"
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
+#include "db/db_impl.h"
 
 namespace leveldb {
 
@@ -102,9 +106,132 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   p = EncodeVarint32(p, val_size);
   memcpy(p, value.data(), val_size);
   assert((p + val_size) - buf == encoded_len);
-  table_.Insert(buf);
+  //std::cout<<"buff: "<<buf<<std::endl;
+  //std::cout<<"p: "<<p<<std::endl;
+
+  if(table_.Contains(buf))
+	  std::cout<<"Duplicate!";
+  else
+	  table_.Insert(buf);
+}
+std::string M_GetVal(const rapidjson::Value& val) {
+
+  std::ostringstream pKey;
+
+  if(val.IsObject())
+  {
+	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
+	rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
+	val.Accept(writer);
+	std::string st=buffer.GetString();
+	return st;
+  }
+  else if(val.IsNumber()) {
+    if(val.IsUint64()) {
+      unsigned long long int tid = val.GetUint64();
+      pKey<<tid;
+    }
+    else if (val.IsInt64()) {
+      long long int tid = val.GetInt64();
+      pKey<<tid;
+    }
+    else if (val.IsDouble()) {
+      double tid = val.GetDouble();
+      pKey<<tid;
+    }
+    else if (val.IsUint()) {
+      unsigned int tid = val.GetUint();
+      pKey<<tid;
+    }
+    else if (val.IsInt()) {
+      int tid = val.GetInt();
+      pKey<<tid;
+    }
+  }
+  else if (val.IsString()) {
+    const char* tid = val.GetString();
+    pKey<<tid;
+  }
+  else if(val.IsBool()) {
+    bool tid = val.GetBool();
+    pKey<<tid;
+  }
+
+  return pKey.str();
 }
 
+
+
+int MemTable::RangeGet(const LookupKey& startkey, std::string& endkey, std::vector<std::string>& value, Status* s, std::string& t, bool isFromQueryDB)
+{
+	Slice memkey = startkey.memtable_key();
+	Table::Iterator iter(&table_);
+	iter.Seek(memkey.data());
+	int resultCount = 0;
+	std::string prevcellstring= "";
+	for (; iter.Valid(); iter.Next())
+	{
+		const char* entry = iter.key();
+		uint32_t key_length;
+		const char* key_ptr = GetVarint32Ptr(entry, entry+5, &key_length);
+
+		std::string cellstring = Slice(key_ptr, key_length - 8).ToString();
+
+		if(prevcellstring == cellstring)
+			continue;
+
+		prevcellstring = cellstring;
+
+		if( cellstring.substr(0, cellstring.size()-1).compare(endkey) >= 0)
+		{
+		// key >= end
+		  break;
+
+		}
+		else
+		{
+
+			if((isFromQueryDB==true && cellstring.back()!='(') || (isFromQueryDB==false && cellstring.back()!='(') )
+			{
+				continue;
+			}
+		}
+
+
+
+		std::string val;
+		const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
+		switch (static_cast<ValueType>(tag & 0xff)) {
+			case kTypeValue: {
+				resultCount++;
+				Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
+				val.assign(v.data(), v.size());
+
+				rapidjson::Document key_list;
+
+				key_list.Parse<0>(val.c_str());
+				rapidjson::SizeType len = key_list.Size();
+				unsigned i = 0;
+
+				while (i < len )
+				{
+					std::string pkey = M_GetVal(key_list[i]);
+
+					bool f = DBImpl::PushResult(value, pkey, t, isFromQueryDB);
+					if(f==false)
+						continue;
+
+					i++;
+
+				}
+			}
+
+		}
+	}
+	//delete iter.;
+	return resultCount;
+
+}
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
   Slice memkey = key.memtable_key();
   Table::Iterator iter(&table_);

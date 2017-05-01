@@ -34,10 +34,21 @@ Status BuildTable(const std::string& dbname,
 
     TableBuilder* builder = new TableBuilder(options, file);
     meta->smallest.DecodeFrom(iter->key());
+    std::string prev = "";
     for (; iter->Valid(); iter->Next()) {
       Slice key = iter->key();
       meta->largest.DecodeFrom(key);
-      builder->Add(key, iter->value());
+      const char * entry = iter->key().data();
+      uint32_t key_length = iter->key().size();
+     // const char* key_ptr = GetVarint32Ptr(entry, entry+5, &key_length);
+
+      std::string cellstring = Slice(entry, key_length - 8).ToString();
+
+
+      if(prev != cellstring)
+    	  builder->Add(key, iter->value());
+      prev = cellstring;
+      //std::cout<<cellstring<<std::endl;
     }
 
     // Finish and check for builder errors

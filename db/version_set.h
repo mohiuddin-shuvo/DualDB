@@ -76,12 +76,19 @@ class Version {
              GetStats* stats);
 
   //Continuous Query DB
+  //simple query
   Status Get( const ReadOptions& options, const LookupKey& k, std::vector<std::string>& value,
           GetStats* stats, std::string& t, bool isQeury, int kNoOfOutputs);
-  
+  //self join query
   Status Get( const ReadOptions& options, const LookupKey& kq, const LookupKey& kd, std::vector<std::string>& users,
 		  std::vector<std::string>& events, std::string& tnow,std::string& tmin,  GetStats* stats);
   
+  //Continuous Range Query
+  //Simple
+  Status RangeGet( const ReadOptions& options, const LookupKey& startk, std::string endkey,
+		  std::vector<std::string>& value, std::string& t,  GetStats* stats, bool isQuery);
+
+
   
   // Adds "stats" into the current state.  Returns true if a new
   // compaction may need to be triggered, false otherwise.

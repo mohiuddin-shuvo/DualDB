@@ -1659,7 +1659,7 @@ std::string GetNextNumberInDewey(std::string lowkey)
 		highkey+=".";
 	}
 	 
-	highkey=std::to_string(num);
+	highkey+=std::to_string(num);
 	
 	return highkey;
 }
@@ -1682,16 +1682,16 @@ Status DBImpl::PublishInDewey(const WriteOptions& options, const Slice& key, con
 	std::string keyq = key.data();
 	std::string keyd = keyq;
 	
-	std::string highkey = GetNextNumberInDewey(keyq);
-	highkey+="Q";
+	std::string endkey = GetNextNumberInDewey(keyq);
+	//highkey+="Q";
 	
-	keyd += "D";
+	keyd += "(";
 
-	keyq += "Q";
+	keyq += ")";
 
     Slice skeyd = keyd;
     Slice startkey = keyq;
-    Slice endkey = highkey;
+   // Slice endkey = highkey;
     //std::vector<std::string> listofUsers;
 
 	//Slice sst = st;
@@ -1701,28 +1701,31 @@ Status DBImpl::PublishInDewey(const WriteOptions& options, const Slice& key, con
     //s = this->GetAllUsers(skeyq, tnow, listofUsers);
 
 	//GET ALL SUBSCRIBERS WITHIN DEWEY HIARARCHY
-	
-	Iterator* it = this->NewIterator( leveldb::ReadOptions());
-    for (it->Seek(startkey); it->Valid(); it->Next()) 
-    {
-        
-        leveldb::Slice cell = it->key();
-        //outputFile<<key.ToString()<<"\n";
-        if( cell.ToString().compare(endkey.ToString()) > 0) 
-        {
-        // key > end
-            break;
-        
-        } 
-        else 
-        {
-        
-        	if(cell.ToString().back()=='Q')
-        		s = this->GetAllUsers(cell, tnow, listofUsers);         
 
-        }
-    }
-   
+	s = this->RangeGet(ReadOptions(), startkey, endkey, listofUsers, tnow, true);
+
+//	Iterator* it = this->NewIterator( leveldb::ReadOptions());
+//    for (it->Seek(startkey); it->Valid(); it->Next())
+//    {
+//
+//        leveldb::Slice cell = it->key();
+//        //outputFile<<key.ToString()<<"\n";
+//        std::string cellstring = cell.ToString();
+//        if( cellstring.substr(0, cellstring.size()-1).compare(endkey.ToString()) > 0)
+//        {
+//        // key > end
+//            break;
+//
+//        }
+//        else
+//        {
+//
+//        	if(cell.ToString().back()=='Q')
+//        		s = this->GetAllUsers(cell, tnow, listofUsers);
+//
+//        }
+//    }
+//
 	
     s = this->Put(options, skeyd, json_value);
 
@@ -2084,24 +2087,27 @@ Status DBImpl::SubscribeInDewey(const ReadOptions& roptions, const Slice& key, c
 
 	std::string keyq = key.data();
 	std::string keyd = keyq;
-	keyd += "D";
+	std::string endkey = GetNextNumberInDewey(keyd);
 
-	keyq += "Q";
+	keyd += "(";
+
+	keyq += ")";
 	
 	
 
-    Slice skeyd = keyd;
+    //Slice skeyd = keyd;
     Slice skeyq = keyq;
     
     Slice startkey = keyd;
-    std::string highkey = GetNextNumberInDewey(keyd);
-    highkey+="D";
-    Slice endkey = highkey;
+
+    //highkey+="D";
+ //   Slice endkey = highkey;
     //std::vector<std::string> listofUsers;
 
 	//Slice sst = st;
 
 	//Status s;
+
    
     if(tnow>tmin)
     {
@@ -2109,27 +2115,12 @@ Status DBImpl::SubscribeInDewey(const ReadOptions& roptions, const Slice& key, c
     	
         //s = this->GetAllEvents(roptions, skeyd, tmin , events);
     	
-    	Iterator* it = this->NewIterator( leveldb::ReadOptions());
-	    for (it->Seek(startkey); it->Valid(); it->Next()) 
-	    {
-	        
-	        leveldb::Slice cell = it->key();
-	        //outputFile<<key.ToString()<<"\n";
-	        if( cell.ToString().compare(endkey.ToString()) > 0) 
-	        {
-	        // key > end
-	            break;
-	        
-	        } 
-	        else 
-	        {
-	        
-	        	if(cell.ToString().back()=='D')
-	        		s = this->GetAllEvents(roptions, cell, tmin , events);         
-
-	        }
-	    }
-    	
+    	s = this->RangeGet(ReadOptions(), startkey, endkey, events, tmin, false);
+    	if(keyd.size()<7)
+    	{
+    	    	//std::cout<<"\nstartKey: "<<keyd<<std::endl;
+    	    	//std::cout<<"events: "<<events.size()<<std::endl;
+    	}
     }
     if(tnow<tmax)
     {
@@ -2311,6 +2302,71 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::vector<std
  
  
 }
+
+
+Status DBImpl::RangeGet(const ReadOptions& options,
+                        const Slice& startkey, std::string& endkey, std::vector<std::string>& results, std::string& t, bool isFromQueryDB)
+{
+
+	Status s;
+	//outputFile<<"innnn\n";
+	MutexLock l(&mutex_);
+	SequenceNumber snapshot;
+	if (options.snapshot != NULL) {
+	  snapshot = reinterpret_cast<const SnapshotImpl*>(options.snapshot)->number_;
+	} else {
+	  snapshot = versions_->LastSequence();
+	}
+
+	MemTable* mem = mem_;
+	MemTable* imm = imm_;
+	Version* current = versions_->current();
+	mem->Ref();
+	if (imm != NULL) imm->Ref();
+	current->Ref();
+
+	bool have_stat_update = false;
+	Version::GetStats stats;
+
+	// Unlock while reading from files and memtables
+	{
+		mutex_.Unlock();
+
+		LookupKey lkey(startkey, snapshot);
+
+
+		int res = mem->RangeGet(lkey, endkey, results, &s, t, isFromQueryDB );
+
+		//std::cout<< "Mem : " <<res<<std::endl;
+		if(imm!=NULL)
+		{
+			res = imm->RangeGet(lkey, endkey, results, &s, t, isFromQueryDB );
+
+			//std::cout<< "Imm : " <<res<<std::endl;
+		}
+
+
+		//s = current->Get(options, lkey, value, &stats);
+
+
+		s = current->RangeGet(options, lkey, endkey, results, t, &stats, isFromQueryDB);
+
+		have_stat_update = true;
+
+		mutex_.Lock();
+
+	}
+
+	/*if (have_stat_update && current->UpdateStats(stats)) {
+	MaybeScheduleCompaction();
+	}*/
+	mem->Unref();
+	if (imm != NULL) imm->Unref();
+	current->Unref();
+
+	return s;
+}
+
 
 
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {

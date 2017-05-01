@@ -57,6 +57,10 @@ class DBImpl : public DB {
 
   virtual Status Get(const ReadOptions& options,
                        const Slice& keyd, const Slice& keyq, std::vector<std::string>& users,  std::vector<std::string>& events, std::string& tnow, std::string& tmin);
+
+  virtual Status RangeGet(const ReadOptions& options,
+                        const Slice& startkey, std::string& endkey, std::vector<std::string>& results, std::string& t, bool isFromQueryDB);
+
 //
 //  virtual Status SGet(const ReadOptions& options,
 //                     const Slice& key, std::vector<KeyValuePair>* value_list, DB* db);

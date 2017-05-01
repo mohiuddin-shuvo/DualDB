@@ -16,6 +16,15 @@
 using namespace std;
 using namespace rapidjson;
 
+#define DEPTH 5
+
+enum TYPEOFEXP
+{
+	SIMPLE,
+	SELFJOIN,
+	DEWEY
+};
+
 
 //server
 //static string dbPath = "/home/mabdu002/ContinuousQuery/DB/BenchmarkDualDB";
@@ -23,9 +32,11 @@ using namespace rapidjson;
 //static string result_filePath = "/home/mabdu002/ContinuousQuery/Results/DualDB_RD_Q50_result.csv";
 
 //ubuntu
-static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/DB/DualDB_Dewey";
-static string benchmarkPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Benchmark/RD_CQ1_Q25_Dewey";
-static string result_filePath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Results/DualDB_Dwey.csv";
+static string dbPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/DB/DualDB_NoDewey_Radius_NR_Q50";
+static string benchmarkPath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Benchmark/NoDeweyRadiusDataset_NR_Q50";
+static string result_filePath = "/home/mohiuddin/Desktop/LevelDB_CQ_Test/Results/DualDB_NoDewey_Radius_NR_Q50";
+static int numberofiterations = 2;
+static long LOG_POINT = 500000;
 
 bool SetAttr(rapidjson::Document& doc, const char* attr, long value) {
   if(!doc.IsObject() || !doc.HasMember(attr) || doc[attr].IsNull())
@@ -80,12 +91,12 @@ std::string parse_json (std::string json)
 
 	bool tmin = SetAttr(document, "Tnow", sec);
 
-	tmin = SetAttr(document, "Tmin", sec-10);
+	tmin = SetAttr(document, "Tmin", sec-60);
 
 	if(tmin) //Query
-		tmin = SetAttr(document, "Tmax", sec+10);
+		tmin = SetAttr(document, "Tmax", sec+60);
 	else //Event
-		tmin = SetAttr(document, "Tmax", sec+15);
+		tmin = SetAttr(document, "Tmax", sec+95);
 
 	rapidjson::GenericStringBuffer<rapidjson::UTF8<>> buffer;
 	rapidjson::Writer< rapidjson::GenericStringBuffer< rapidjson::UTF8<> > > writer(buffer);
@@ -94,7 +105,9 @@ std::string parse_json (std::string json)
 	return st;
 }
 
-void test_frombenchmark()
+
+
+void test_frombenchmark(int typeofexp, int loop)
 {
     
     //
@@ -117,8 +130,23 @@ void test_frombenchmark()
 
     ifstream ifile(benchmarkPath.c_str());
     if (!ifile) { cerr << "Can't open input file " << endl; return; }
-    ofstream ofile(result_filePath.c_str(),  std::ofstream::out | std::ofstream::app );
+    ofstream ofile((result_filePath+".csv").c_str(),  std::ofstream::out | std::ofstream::app );
     if (!ofile) { cerr << "Can't open output file " << endl; return; }
+    ofstream* ofiles;
+
+
+    if(typeofexp==TYPEOFEXP::DEWEY)
+	{
+    	 ofiles = new ofstream[DEPTH];
+		for(int j=0 ;j <DEPTH; j++)
+		{
+			//cout<< Deweydata[i];
+			//cout<<Deweyquery;
+//			/std::string path = result_filePath+ "" + (j+1);
+			ofiles[j].open((result_filePath + "_" + std::to_string(j+1) + ".csv").c_str() , std::ofstream::out | std::ofstream::app );
+		}
+
+	}
 
     std::cout << "Trying to create database\n";
 
@@ -126,7 +154,7 @@ void test_frombenchmark()
     assert(status.ok());
 
     string line;
-	int i=0;
+	//int i=0;
 	rapidjson::Document d;
 	leveldb::ReadOptions roptions;
 	double data=0, query=0;
@@ -135,102 +163,257 @@ void test_frombenchmark()
 
 	vector<string> events;
 	vector<string> users;
+	double * Deweydata , *Deweyquery ;
+	double * Deweyresultsdata , *Deweyresultsquery ;
+	double * DeweydurationData, *DeweydurationQuery;
+	if(typeofexp==TYPEOFEXP::DEWEY)
+	{
+		Deweydata = new double [DEPTH];
+		Deweyquery = new double [DEPTH];
+		DeweydurationData = new double [DEPTH];
+		DeweydurationQuery = new double [DEPTH];
+		Deweyresultsdata = new double [DEPTH];
+		Deweyresultsquery = new double [DEPTH];
+
+		for(int i=0 ;i <DEPTH; i++)
+		{
+			Deweydata[i] = 0;
+			Deweyquery[i]=0;
+			DeweydurationData[i]=0;
+			DeweydurationQuery[i]=0;
+			Deweyresultsdata[i] = 0;
+			Deweyresultsquery[i] = 0;
+		}
+
+	}
 
 	long userc = 0, eventc = 0;
-    while(getline(ifile, line)) {
+	long index = 0;
+	int depth = 0;
+	long i =0;
 
-    	i++;
+	long linecount = 0;
+	for(int itr = 0 ; itr<loop; itr++)
+	{
+		while(getline(ifile, line)) {
 
-		std::vector<std::string> x = split(line, '\t');
-		leveldb::WriteOptions woptions;
-		struct timeval start, end;
-		if(x.size()==3) {
-			leveldb::Slice key = x[1];
-			if(x[1].empty())
-				continue;
-			//cout<<parse_json(x[2])<<endl;
-			//continue;
-			string json_string = parse_json(x[2]);
-			leveldb::Slice json_value = json_string;
-			//cout<<x[1]<<" ";
-			//cout<<json_value.ToString()<<endl;
+			//i++;
+			//linecount++;
 
-			gettimeofday(&start, NULL);
-			if(x[0]=="D") {
+			std::vector<std::string> x = split(line, '\t');
+			leveldb::WriteOptions woptions;
+			struct timeval start, end;
+			if(x.size()==5) {
+				index = std::stol(x[1]);
+				depth = std::stoi(x[2]);
+				string keys = x[3];
+				leveldb::Slice key = keys;
+				if(x[1].empty())
+					continue;
+				//cout<<parse_json(x[2])<<endl;
+				//continue;
+				string json_string = parse_json(x[4]);
+				leveldb::Slice json_value = json_string;
+				//cout<< key.ToString()<<" -> ";
+				//cout<<json_value.ToString()<<endl;
 
-				leveldb::Status s = db->PublishAndSelfJoin(woptions,key, json_value, users, events );
-				//leveldb::Status s = db->Publish(woptions, key , json_value, users);
+	//			if(index >= 1000)
+	//				break;
+	//			cout<<x[0]<<endl;
+	//			cout<<x[1]<<endl;
+	//			cout<<x[3]<<endl;
+	//			cout<<x[4]<<endl;
+				gettimeofday(&start, NULL);
+				if(x[0]=="D") {
 
-				gettimeofday(&end, NULL);
-				durationData+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
-				//print_vals(users);
-				//cout<<"Users: "<<users.size()<<endl;
+					leveldb::Status s;
+					if(typeofexp==TYPEOFEXP::SELFJOIN)
+						s = db->PublishAndSelfJoin(woptions,key, json_value, users, events );
+					else if(typeofexp==TYPEOFEXP::SIMPLE)
+						s = db->Publish(woptions, key , json_value, users);
+					else if(typeofexp==TYPEOFEXP::DEWEY)
+					{
+						s = db->PublishInDewey(woptions, key , json_value, users);
 
-				if(users.size()>0)
-				{
+					}
+					gettimeofday(&end, NULL);
+					if(typeofexp==TYPEOFEXP::DEWEY)
+					{
+						//int s = split(x[1], '.').size()-1;
+
+						DeweydurationData[depth-1] += ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+
+						if(i!=index)
+						{
+							data++;
+							Deweydata[depth-1]++;
+						}
+						Deweyresultsdata[depth-1] += users.size();
+					}
+
+					durationData+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+					//print_vals(users);
 					//cout<<"Users: "<<users.size()<<endl;
-					userc+=users.size();
-					users.clear();
 
+					if(users.size()>0)
+					{
+						//cout<<"Users: "<<users.size()<<endl;
+						userc+=users.size();
+						users.clear();
+
+
+					}
+					if(events.size()>0)
+					{
+						//cout<<"Events: "<<events.size()<<endl;
+						events.clear();
+					}
 
 				}
-				if(events.size()>0)
+				else if(x[0]=="Q")
 				{
+					leveldb::Status s;
+					if(typeofexp==TYPEOFEXP::SELFJOIN)
+						s = db->SubscribeAndSelfJoin(roptions,key, json_value, users, events );
+					else if(typeofexp==TYPEOFEXP::SIMPLE)
+						s = db->Subscribe(roptions, key , json_value, events);
+					else if(typeofexp==TYPEOFEXP::DEWEY)
+					{
+						s = db->SubscribeInDewey(roptions, key , json_value, events);
+
+					}
+					gettimeofday(&end, NULL);
+					if(typeofexp==TYPEOFEXP::DEWEY)
+					{
+						//int s = split(x[1], '.').size()-1;
+						DeweydurationQuery[depth-1] += ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+						if(i!=index)
+						{
+							query++;
+							Deweyquery[depth-1]++;
+						}
+						Deweyresultsquery[depth-1] += events.size();
+					}
+
+					//leveldb::Status s = db->Subscribe(roptions, key , json_value, events);
+					//leveldb::Status s = db->SubscribeAndSelfJoin(roptions, key , json_value, users, events );
+
+					//gettimeofday(&end, NULL);
+					durationQuery+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+					//print_vals(events);
+
 					//cout<<"Events: "<<events.size()<<endl;
-					events.clear();
+					if(users.size()>0)
+					{
+	//					//cout<<"Users: "<<users.size()<<endl;
+						users.clear();
+	//
+					}
+					if(events.size()>0) {
+						//cout<<"Events: "<<events.size()<<endl;
+						eventc+=events.size();
+						events.clear();
+					}
+
 				}
-				data++;
 			}
-			else if(x[0]=="Q")
+
+			if(i!=index)
 			{
+				i = index;
+				linecount++;
+		//		if(i==20)
+		//			break;
+				if (linecount%LOG_POINT == 0) {
+					//cout<<corr<<endl;
+		//			ofile<<"i: "<<i<<endl;
+		//			ofile<<"Number of Queries: "<<query<<endl;
+		//			ofile<<"Total Query duration: "<<durationQuery<<endl;
+		//			ofile<<"Time per Query: "<<durationQuery/query<<endl<<endl;
+		//
+					//cout<<i<<endl<<"Time per Query: "<<durationQuery/query<<endl;
+		//
+		//			ofile<<"Number of Events: "<<data<<endl;
+		//			ofile<<"Total Event duration: "<<durationData<<endl;
+		//			ofile<<"Time per Event: "<<durationData/data<<endl<<endl;
+		//
+					//cout<<"Time per Data: "<<durationData/data<<endl<<endl;
+		//
+		//			ofile<<"Number of operation: "<<data+query<<endl;
+		//			ofile<<"Time taken of all operation: "<<(durationData+durationQuery)<<endl;
+		//			ofile<<"Time per operation: "<<(durationData+durationQuery)/(data+query)<<endl<<endl<<endl;
 
-				//leveldb::Status s = db->Subscribe(roptions, key , json_value, events);
-				leveldb::Status s = db->SubscribeAndSelfJoin(roptions, key , json_value, users, events );
+					//cout<< userc/data <<","<<eventc/query<<endl;
+					if(linecount%LOG_POINT==0)
+					{
+						if(linecount/LOG_POINT==1)
+						{
+							ofile << "No of Op (Millions)" <<"," << "Time Per Op (MicroSec)" <<"," << "No of Queries (Millions)" <<"," << "Time Per SUBSCRIBE op (MicroSec)" <<"," << "No of Events (Millions)" <<"," << "Time Per PUBLISH op (MicroSec)" << ","<< "Results per SUB Query" <<","<<  "Results per PUB Query" <<endl;
+						}
 
-				gettimeofday(&end, NULL);
-				durationQuery+= ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
-				//print_vals(events);
+						ofile<< linecount/LOG_POINT <<"," << (durationData+durationQuery)/linecount <<"," << query/LOG_POINT <<"," << durationQuery/query <<"," << data/LOG_POINT <<"," << durationData/data << ","<< eventc/query  <<","<< userc/data <<endl;
 
-				//cout<<"Events: "<<events.size()<<endl;
-				if(users.size()>0)
-				{
-//					//cout<<"Users: "<<users.size()<<endl;
-					users.clear();
-//
+
+						if(typeofexp==TYPEOFEXP::DEWEY)
+						{
+
+							for(int j=0 ;j <DEPTH; j++)
+							{
+								//cout<< Deweydata[i];
+								//cout<<Deweyquery;
+								if(linecount/LOG_POINT==1)
+								{
+									ofiles[j] << "No of Op (Millions)" << ","<< "Time Per Op" <<"," << "Time Per SUBSCRIBE op (MicroSec)" <<"," << "Time Per PUBLISH op (MicroSec)" << ","<< "Results per SUB Query" <<","<<  "Results per PUB Query" <<endl;
+								}
+
+								// (i/1000000) * ((Deweydata[j]+Deweyquery[j])/i) *100.0
+								ofiles[j]<< linecount/LOG_POINT <<"," << (DeweydurationQuery[j]+DeweydurationData[j])/(Deweyquery[j]+Deweydata[j]) <<"," << DeweydurationData[j]/Deweydata[j] <<","  << DeweydurationQuery[j]/Deweyquery[j] <<"," << Deweyresultsquery[j]/Deweyquery[j] <<","<<Deweyresultsdata[j]/Deweydata[j]<<endl;
+
+							}
+
+						}
+
+
+
+					}
+					cout<< linecount <<"," << (durationData+durationQuery)/linecount <<"," << query <<"," << durationQuery/query <<"," << data <<"," << durationData/data << ","<< userc/data <<","<<eventc/query<<endl;
+
+					cout<< userc/data <<","<<eventc/query<<endl;
+
+					if(typeofexp==TYPEOFEXP::DEWEY)
+					{
+
+						for(int j=0 ;j <DEPTH; j++)
+						{
+							//cout<< Deweydata[i];
+							//cout<<Deweyquery;
+							cout<<"Depth: "<<j+1<<endl;
+							cout<<"Time Per Op: "<<endl;
+							cout<<"Publish: ";
+							cout<<DeweydurationData[j]/Deweydata[j];
+							cout<<", Subscribe: ";
+							cout<<DeweydurationQuery[j]/Deweyquery[j];
+							cout<<endl<<endl;
+
+							cout<<"Result Per Op: "<<endl;
+							cout<<"Publish: ";
+							cout<<Deweyresultsdata[j]/Deweydata[j];
+							cout<<", Subscribe: ";
+							cout<<Deweyresultsquery[j]/Deweyquery[j];
+
+							cout<<endl<<endl;
+						}
+
+					}
+
+
 				}
-				if(events.size()>0) {
-					//cout<<"Events: "<<events.size()<<endl;
-					eventc+=events.size();
-					events.clear();
-				}
-				query++;
 			}
 		}
-//		if(i==20)
-//			break;
-		if (i%50000 == 0) {
-//			ofile<<"i: "<<i<<endl;
-//			ofile<<"Number of Queries: "<<query<<endl;
-//			ofile<<"Total Query duration: "<<durationQuery<<endl;
-//			ofile<<"Time per Query: "<<durationQuery/query<<endl<<endl;
-//
-			//cout<<i<<endl<<"Time per Query: "<<durationQuery/query<<endl;
-//
-//			ofile<<"Number of Events: "<<data<<endl;
-//			ofile<<"Total Event duration: "<<durationData<<endl;
-//			ofile<<"Time per Event: "<<durationData/data<<endl<<endl;
-//
-			//cout<<"Time per Data: "<<durationData/data<<endl<<endl;
-//
-//			ofile<<"Number of operation: "<<data+query<<endl;
-//			ofile<<"Time taken of all operation: "<<(durationData+durationQuery)<<endl;
-//			ofile<<"Time per operation: "<<(durationData+durationQuery)/(data+query)<<endl<<endl<<endl;
 
-			ofile<< i <<"," << (durationData+durationQuery)/i <<"," << query <<"," << durationQuery/query <<"," << data <<"," << durationData/data << ","<< userc/data <<","<<eventc/query<<endl;
-			//cout<< userc/data <<","<<eventc/query<<endl;
-
-		}
-    }
+		ifile.clear();
+		ifile.seekg(0, ios::beg);
+	}
 
     delete db;
     delete options.block_cache;
@@ -278,8 +461,6 @@ void testingRapidJson ()
 
 		i--;
 	}
-
-
 }
 
 /*
@@ -287,8 +468,30 @@ void testingRapidJson ()
  */
 int main(int argc, char** argv) {
 
-	test_frombenchmark();
-	cout<<"Compile_DualDB build new!\n";
+
+	if(argc == 4)
+	{
+		benchmarkPath = argv[1];
+		dbPath = argv[2];
+		result_filePath = argv[3];
+		//cout<< argv[3] ;
+		test_frombenchmark(TYPEOFEXP::DEWEY, numberofiterations);
+
+	}
+	else
+	{
+		test_frombenchmark(TYPEOFEXP::DEWEY, numberofiterations);
+		cout<<"Please Put arguments in order: \n arg1=benchmarkpath arg2=dbpath arg3=resultpath\n";
+	}
+	//cout<<"\nasdasd\n";
+	//else
+
+
+
+	//	string cellstring  = "2.3.5Q";
+//	string endkey = "2.3.5";
+//	cellstring.substr(0, cellstring.size()-1).compare(endkey) >= 0 ? cout <<"break": cout<<"continue";
+	//cout<<"Compile_DualDB!\n";
 	return 0;
 }
 
